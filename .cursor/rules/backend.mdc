@@ -1,0 +1,584 @@
+﻿---
+description: "Backend patterns for Fastify, LLM providers, services"
+globs: ["server/**"]
+alwaysApply: false
+---
+
+# Backend Patterns
+
+## Architecture: Routes ΓåÆ Services ΓåÆ Repositories
+
+### Route (Thin)
+
+```typescript
+fastify.get('/', async (request, reply) => {
+  const chats = chatService.listChats(request.userId);
+  return reply.send({ data: chats, total: chats.length });
+});
+```
+
+### Service (Business Logic)
+
+```typescript
+// server/src/services/chat.service.ts
+export const chatService = {
+  listChats(userId: string) {
+    return chatRepository.findAll(userId);
+  },
+  
+  addMessage(chatId: string, userId: string, payload: CreateMessagePayload) {
+    const chat = chatRepository.findById(chatId);
+    if (!chat) throw new ChatError('Chat not found', 404);
+    if (chat.userId !== userId) throw new ChatError('Unauthorized', 403);
+    
+    const message: Message = {
+      id: crypto.randomUUID(),
+      role: payload.role,
+      content: payload.content,
+      createdAt: new Date().toISOString(),
+    };
+    
+    chatRepository.addMessage(chatId, message);
+    return message;
+  },
+  
+  validateChatAccess(chatId: string, userId: string): void {
+    const chat = chatRepository.findById(chatId);
+    if (!chat) throw new ChatError('Chat not found', 404);
+    if (chat.userId !== userId) throw new ChatError('Unauthorized', 403);
+  },
+  
+  prepareLLMMessages(chatId: string, userId: string): LLMMessage[] {
+    const chat = chatRepository.findById(chatId);
+    if (!chat) throw new ChatError('Chat not found', 404);
+    
+    return chat.messages.map(m => ({
+      role: m.role,
+      content: m.content,
+    }));
+  },
+};
+
+export class ChatError extends Error {
+  constructor(message: string, public statusCode: number = 400) {
+    super(message);
+    this.name = 'ChatError';
+  }
+}
+```
+
+### Repository (Data Access)
+
+```typescript
+// server/src/repositories/chat.repository.ts
+const chatStore = new Map<string, ChatData>();
+
+export const chatRepository = {
+  findAll(userId: string): ChatData[] {
+    return Array.from(chatStore.values())
+      .filter(chat => chat.userId === userId)
+      .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+  },
+  
+  findById(id: string): ChatData | undefined {
+    return chatStore.get(id);
+  },
+  
+  create(data: Omit<ChatData, 'id' | 'createdAt' | 'updatedAt'>): ChatData {
+    const now = new Date().toISOString();
+    const chat: ChatData = {
+      ...data,
+      id: crypto.randomUUID(),
+      createdAt: now,
+      updatedAt: now,
+    };
+    chatStore.set(chat.id, chat);
+    return chat;
+  },
+  
+  addMessage(chatId: string, message: Message): void {
+    const chat = chatStore.get(chatId);
+    if (chat) {
+      chat.messages.push(message);
+      chat.updatedAt = new Date().toISOString();
+    }
+  },
+  
+  update(id: string, updates: Partial<ChatData>): ChatData | undefined {
+    const chat = chatStore.get(id);
+    if (chat) {
+      Object.assign(chat, updates, { updatedAt: new Date().toISOString() });
+    }
+    return chat;
+  },
+  
+  delete(id: string): boolean {
+    return chatStore.delete(id);
+  },
+};
+```
+
+---
+
+## LLM Provider Abstraction (Strategy Pattern)
+
+### Provider Interface
+
+```typescript
+// server/src/providers/llm/types.ts
+export interface LLMProvider {
+  name: string;
+  type: LLMProviderType;
+  
+  streamResponse(
+    messages: LLMMessage[],
+    model?: string
+  ): AsyncIterable<LLMStreamChunk>;
+  
+  listModels(apiKey?: string): Promise<ModelInfo[]>;
+  getDefaultModel(): string;
+}
+
+export interface LLMStreamChunk {
+  type: 'connected' | 'text' | 'done' | 'error';
+  content?: string;
+  error?: string;
+}
+
+export interface LLMProviderOptions {
+  apiKey: string;
+  defaultModel?: string;
+  baseURL?: string;
+  customHeaders?: Record<string, string>;
+}
+```
+
+### Anthropic Provider
+
+```typescript
+// server/src/providers/llm/anthropic.provider.ts
+import Anthropic from '@anthropic-ai/sdk';
+
+export class AnthropicProvider implements LLMProvider {
+  name = 'Anthropic';
+  type = 'anthropic' as const;
+  private client: Anthropic;
+  private defaultModel: string;
+  
+  constructor(options: LLMProviderOptions) {
+    this.client = new Anthropic({ apiKey: options.apiKey });
+    this.defaultModel = options.defaultModel || 'claude-sonnet-4-20250514';
+  }
+  
+  async *streamResponse(
+    messages: LLMMessage[],
+    model?: string
+  ): AsyncIterable<LLMStreamChunk> {
+    // Separate system messages (Anthropic API requirement)
+    const systemMessage = messages.find(m => m.role === 'system');
+    const conversationMessages = messages.filter(m => m.role !== 'system');
+    
+    const stream = await this.client.messages.stream({
+      model: model || this.defaultModel,
+      max_tokens: 4096,
+      system: systemMessage?.content,
+      messages: conversationMessages.map(m => ({
+        role: m.role as 'user' | 'assistant',
+        content: m.content,
+      })),
+    });
+    
+    for await (const event of stream) {
+      if (event.type === 'content_block_delta' && 
+          event.delta.type === 'text_delta') {
+        yield { type: 'text', content: event.delta.text };
+      }
+    }
+    
+    yield { type: 'done' };
+  }
+  
+  async listModels(): Promise<ModelInfo[]> {
+    return [
+      { id: 'claude-sonnet-4-20250514', name: 'Claude Sonnet 4' },
+      { id: 'claude-3-7-sonnet-20250219', name: 'Claude 3.7 Sonnet' },
+      { id: 'claude-3-5-haiku-20241022', name: 'Claude 3.5 Haiku' },
+    ];
+  }
+  
+  getDefaultModel(): string {
+    return this.defaultModel;
+  }
+}
+```
+
+### OpenAI Provider
+
+```typescript
+// server/src/providers/llm/openai.provider.ts
+import OpenAI from 'openai';
+
+export class OpenAIProvider implements LLMProvider {
+  name = 'OpenAI';
+  type = 'openai' as const;
+  private client: OpenAI;
+  private defaultModel: string;
+  
+  constructor(options: LLMProviderOptions) {
+    this.client = new OpenAI({ apiKey: options.apiKey });
+    this.defaultModel = options.defaultModel || 'gpt-4o';
+  }
+  
+  async *streamResponse(
+    messages: LLMMessage[],
+    model?: string
+  ): AsyncIterable<LLMStreamChunk> {
+    const stream = await this.client.chat.completions.create({
+      model: model || this.defaultModel,
+      messages: messages.map(m => ({
+        role: m.role as 'system' | 'user' | 'assistant',
+        content: m.content,
+      })),
+      stream: true,
+    });
+    
+    for await (const chunk of stream) {
+      const content = chunk.choices[0]?.delta?.content;
+      if (content) {
+        yield { type: 'text', content };
+      }
+    }
+    
+    yield { type: 'done' };
+  }
+  
+  async listModels(apiKey?: string): Promise<ModelInfo[]> {
+    const client = apiKey ? new OpenAI({ apiKey }) : this.client;
+    const response = await client.models.list();
+    return response.data
+      .filter(m => m.id.includes('gpt'))
+      .map(m => ({
+        id: m.id,
+        name: m.id,
+        created: m.created,
+        owned_by: m.owned_by,
+      }));
+  }
+  
+  getDefaultModel(): string {
+    return this.defaultModel;
+  }
+}
+```
+
+### Gemini Provider
+
+```typescript
+// server/src/providers/llm/gemini.provider.ts
+import { GoogleGenerativeAI } from '@google/generative-ai';
+
+export class GeminiProvider implements LLMProvider {
+  name = 'Google Gemini';
+  type = 'gemini' as const;
+  private client: GoogleGenerativeAI;
+  private defaultModel: string;
+  
+  constructor(options: LLMProviderOptions) {
+    this.client = new GoogleGenerativeAI(options.apiKey);
+    this.defaultModel = options.defaultModel || 'gemini-2.0-flash-exp';
+  }
+  
+  async *streamResponse(
+    messages: LLMMessage[],
+    model?: string
+  ): AsyncIterable<LLMStreamChunk> {
+    const genModel = this.client.getGenerativeModel({
+      model: model || this.defaultModel,
+    });
+    
+    // Convert messages to Gemini format
+    const history = messages.slice(0, -1).map(m => ({
+      role: m.role === 'assistant' ? 'model' : 'user',
+      parts: [{ text: m.content }],
+    }));
+    
+    const lastMessage = messages[messages.length - 1];
+    
+    const chat = genModel.startChat({ history });
+    const result = await chat.sendMessageStream(lastMessage.content);
+    
+    for await (const chunk of result.stream) {
+      const text = chunk.text();
+      if (text) {
+        yield { type: 'text', content: text };
+      }
+    }
+    
+    yield { type: 'done' };
+  }
+  
+  async listModels(): Promise<ModelInfo[]> {
+    return [
+      { id: 'gemini-2.0-flash-exp', name: 'Gemini 2.0 Flash' },
+      { id: 'gemini-exp-1206', name: 'Gemini Exp 1206' },
+      { id: 'gemini-1.5-pro', name: 'Gemini 1.5 Pro' },
+    ];
+  }
+  
+  getDefaultModel(): string {
+    return this.defaultModel;
+  }
+}
+```
+
+### Custom Provider (OpenAI-Compatible)
+
+```typescript
+// server/src/providers/llm/custom.provider.ts
+import OpenAI from 'openai';
+
+export class CustomProvider implements LLMProvider {
+  name = 'Custom LLM';
+  type = 'custom' as const;
+  private client: OpenAI;
+  private defaultModel: string;
+  private baseURL: string;
+  
+  constructor(options: LLMProviderOptions) {
+    if (!options.baseURL) {
+      throw new Error('baseURL required for custom provider');
+    }
+    
+    this.baseURL = options.baseURL;
+    this.defaultModel = options.defaultModel || 'default';
+    
+    this.client = new OpenAI({
+      apiKey: options.apiKey || 'not-needed',
+      baseURL: options.baseURL,
+      defaultHeaders: options.customHeaders,
+    });
+  }
+  
+  async *streamResponse(
+    messages: LLMMessage[],
+    model?: string
+  ): AsyncIterable<LLMStreamChunk> {
+    const stream = await this.client.chat.completions.create({
+      model: model || this.defaultModel,
+      messages: messages.map(m => ({
+        role: m.role as 'system' | 'user' | 'assistant',
+        content: m.content,
+      })),
+      stream: true,
+    });
+    
+    for await (const chunk of stream) {
+      const content = chunk.choices[0]?.delta?.content;
+      if (content) {
+        yield { type: 'text', content };
+      }
+    }
+    
+    yield { type: 'done' };
+  }
+  
+  async listModels(): Promise<ModelInfo[]> {
+    return [
+      { id: this.defaultModel, name: this.defaultModel },
+    ];
+  }
+  
+  getDefaultModel(): string {
+    return this.defaultModel;
+  }
+}
+```
+
+### Factory with Caching
+
+```typescript
+// server/src/providers/llm/index.ts
+const providerCache = new Map<string, LLMProvider>();
+
+export function createLLMProvider(
+  providerType: LLMProviderType,
+  options: LLMProviderOptions
+): LLMProvider {
+  switch (providerType) {
+    case 'anthropic': return new AnthropicProvider(options);
+    case 'openai': return new OpenAIProvider(options);
+    case 'gemini': return new GeminiProvider(options);
+    case 'custom': return new CustomProvider(options);
+    default:
+      const _exhaustive: never = providerType;
+      throw new Error(`Unknown provider: ${_exhaustive}`);
+  }
+}
+
+export function getProvider(
+  providerType?: LLMProviderType,
+  apiKey?: string,
+  userId?: string,
+  customConfig?: CustomLLMConfig
+): LLMProvider {
+  const cacheKey = `${providerType}:${apiKey?.slice(0,10)}`;
+  
+  if (!providerCache.has(cacheKey)) {
+    const provider = createLLMProvider(providerType || 'anthropic', {
+      apiKey: apiKey || process.env.LLM_API_KEY!,
+      defaultModel: process.env.LLM_MODEL,
+      baseURL: customConfig?.baseURL,
+      customHeaders: customConfig?.customHeaders,
+    });
+    providerCache.set(cacheKey, provider);
+  }
+  
+  return providerCache.get(cacheKey)!;
+}
+```
+
+---
+
+## SSE Streaming (Complete Implementation)
+
+```typescript
+// POST /chat/stream - Complete SSE endpoint
+fastify.post<{ Body: StreamChatRequest }>('/stream', async (request, reply) => {
+  const { userId } = request;
+  const { chatId, content, provider: providerType, model, customConfig } = request.body;
+  
+  // Validation
+  if (!chatId) {
+    return reply.status(400).send({ error: 'chatId is required' });
+  }
+  
+  if (!content || typeof content !== 'string' || content.trim() === '') {
+    return reply.status(400).send({ error: 'content is required' });
+  }
+  
+  // Validate chat ownership
+  try {
+    chatService.validateChatAccess(chatId, userId);
+  } catch (error) {
+    if (error instanceof ChatError) {
+      return reply.status(error.statusCode).send({ error: error.message });
+    }
+    throw error;
+  }
+  
+  request.log.info({ chatId, userId }, 'Starting chat stream');
+  
+  // Add user message to chat
+  chatService.addMessage(chatId, userId, {
+    role: 'user',
+    content: content.trim(),
+  });
+  
+  // Set up SSE response headers
+  reply.raw.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache, no-transform',
+    'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no',
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Credentials': 'true',
+  });
+  
+  // Send connection confirmation
+  reply.raw.write(`data: ${JSON.stringify({ type: 'connected' })}\n\n`);
+  
+  try {
+    // Get LLM provider
+    const provider = getProvider(providerType, undefined, userId, customConfig);
+    const messages = chatService.prepareLLMMessages(chatId, userId);
+    
+    // Detect project plan request
+    if (/project plan/i.test(content)) {
+      messages.unshift({
+        role: 'system',
+        content: PROJECT_PLAN_SYSTEM_PROMPT,
+      });
+    }
+    
+    let fullResponse = '';
+    
+    // Stream the response
+    for await (const chunk of provider.streamResponse(messages, model)) {
+      reply.raw.write(`data: ${JSON.stringify(chunk)}\n\n`);
+      
+      if (chunk.type === 'text' && chunk.content) {
+        fullResponse += chunk.content;
+      }
+      
+      if (chunk.type === 'done' && fullResponse) {
+        chatService.addMessage(chatId, userId, {
+          role: 'assistant',
+          content: fullResponse,
+        });
+      }
+    }
+    
+    request.log.info({ responseLength: fullResponse.length }, 'Stream completed');
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    request.log.error({ error: errorMessage }, 'Stream error');
+    reply.raw.write(`data: ${JSON.stringify({ 
+      type: 'error', 
+      error: errorMessage 
+    })}\n\n`);
+  } finally {
+    reply.raw.end();
+  }
+});
+```
+
+---
+
+## Error Handling
+
+```typescript
+// Custom error class
+export class ChatError extends Error {
+  constructor(message: string, public statusCode: number = 400) {
+    super(message);
+    this.name = 'ChatError';
+  }
+}
+
+// Route error handler
+fastify.setErrorHandler((error, request, reply) => {
+  if (error instanceof ChatError) {
+    return reply.status(error.statusCode).send({ 
+      error: error.message,
+      statusCode: error.statusCode,
+    });
+  }
+  
+  request.log.error(error);
+  return reply.internalServerError('An unexpected error occurred');
+});
+
+// Using @fastify/sensible helpers
+reply.notFound('Chat not found');
+reply.badRequest('Invalid input');
+reply.unauthorized('Missing authorization');
+reply.internalServerError('Failed to process');
+```
+
+---
+
+## Must-Do Checklist
+
+- [ ] Thin routes (< 50 lines, delegate to services)
+- [ ] Types in `server/src/types.ts`
+- [ ] LLM via factory `server/src/providers/llm/`
+- [ ] Error handling with ChatError or sensible
+- [ ] Logging with request.log, not console.log
+- [ ] Validate user input (trim, check empty)
+- [ ] Exhaustive type checking with `never`
+
+## Context7 IDs
+
+- Fastify: `/fastify/fastify`
+- Anthropic SDK: `/anthropics/anthropic-sdk-typescript`
+- OpenAI SDK: `/openai/openai-node`

@@ -1,0 +1,553 @@
+﻿---
+description: "Frontend patterns for React, Tailwind, TanStack Query, Motion"
+globs: ["web/**"]
+alwaysApply: false
+---
+
+# Frontend Patterns
+
+## Tailwind CSS - Semantic Tokens
+
+**ALWAYS use semantic tokens, NEVER hardcoded colors:**
+
+```tsx
+// Γ¥î WRONG
+<div className="bg-gray-900 text-white">
+
+// Γ£à CORRECT
+<div className="bg-card text-card-foreground">
+```
+
+### Available Tokens
+
+| Token | Usage | Example |
+|-------|-------|---------|
+| `bg-background` / `text-foreground` | Page backgrounds, primary text | `<body>`, `<main>` |
+| `bg-card` / `text-card-foreground` | Cards, panels | Messages, sidebars |
+| `text-muted-foreground` | Secondary text | Descriptions, timestamps |
+| `border-border` | All borders | Card borders, dividers |
+| `bg-primary` / `text-primary-foreground` | Brand elements | Buttons, badges |
+| `hover:bg-accent` / `hover:text-accent-foreground` | Hover states | Clickable items |
+| `bg-destructive` / `text-destructive` | Errors | Error messages |
+
+### Component Pattern
+
+```tsx
+<div className="rounded-lg border border-border bg-card p-4">
+  <h3 className="text-lg font-semibold text-card-foreground">Title</h3>
+  <p className="mt-2 text-sm text-muted-foreground">Description</p>
+  <button className="mt-4 rounded bg-primary px-4 py-2 text-primary-foreground hover:opacity-90">
+    Action
+  </button>
+</div>
+```
+
+### Conditional Classes with cn()
+
+```tsx
+import { cn } from "@/lib/utils";
+
+// Variants
+className={cn(
+  "rounded px-4 py-2 transition-colors",
+  variant === "primary" && "bg-primary text-primary-foreground",
+  variant === "secondary" && "bg-secondary text-secondary-foreground",
+  className // Allow overrides
+)}
+
+// Conditional
+className={cn(
+  "p-4 rounded-lg",
+  isActive && "bg-accent",
+  isDisabled && "opacity-50 pointer-events-none"
+)}
+```
+
+### Responsive Design
+
+```tsx
+<div className="
+  grid gap-4
+  grid-cols-1
+  md:grid-cols-2
+  lg:grid-cols-3
+">
+```
+
+---
+
+## TanStack Query v5
+
+### Query Keys (Centralized)
+
+```typescript
+// web/src/data/queryKeys.ts - Complete structure
+export const queryKeys = {
+  user: {
+    all: ['user'] as const,
+    current: () => [...queryKeys.user.all, 'current'] as const,
+  },
+  
+  chats: {
+    all: ['chats'] as const,
+    list: () => [...queryKeys.chats.all, 'list'] as const,
+    detail: (id: string) => [...queryKeys.chats.all, 'detail', id] as const,
+    messages: (id: string) => [...queryKeys.chats.all, id, 'messages'] as const,
+  },
+  
+  providers: {
+    all: ['providers'] as const,
+    list: () => [...queryKeys.providers.all, 'list'] as const,
+    models: (provider: string) => [...queryKeys.providers.all, provider, 'models'] as const,
+  },
+} as const;
+```
+
+### QueryClient Configuration
+
+```typescript
+// Create QueryClient with production-ready config
+import { QueryClient, keepPreviousData } from '@tanstack/react-query';
+import { AxiosError } from 'axios';
+
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 1000 * 60 * 5, // 5 minutes
+      retry: (failureCount, error) => {
+        // Don't retry 4xx errors
+        if (error instanceof AxiosError && error.response?.status < 500) {
+          return false;
+        }
+        return failureCount < 3;
+      },
+      refetchOnWindowFocus: false, // Prevent unexpected refetches
+      placeholderData: keepPreviousData, // Smooth transitions
+    },
+    mutations: {
+      retry: 1,
+      onError: (error) => {
+        toast.error(error.message || 'Something went wrong');
+      },
+    },
+  },
+});
+```
+
+### Handle All States
+
+```typescript
+// Always handle isPending, isError, data
+const { data, isPending, isError, error } = useQuery({
+  queryKey: queryKeys.chats.list(),
+  queryFn: fetchChats,
+});
+
+if (isPending) return <Spinner />;
+if (isError) return <ErrorMessage error={error} />;
+return <ChatList chats={data.data} />;
+```
+
+### Mutations with Optimistic Updates
+
+```typescript
+const createChatMutation = useMutation({
+  mutationFn: async (payload: CreateChatPayload) => {
+    const response = await apiClient.post('/chat', payload);
+    return response.data;
+  },
+  
+  onMutate: async (payload) => {
+    await queryClient.cancelQueries({ queryKey: queryKeys.chats.all });
+    
+    const previousChats = queryClient.getQueryData(queryKeys.chats.list());
+    
+    // Optimistic update
+    const optimisticChat: Chat = {
+      id: `temp-${Date.now()}`,
+      title: payload.title || 'New Chat',
+      userId: 'current-user',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    
+    queryClient.setQueryData(queryKeys.chats.list(), (old: any) => ({
+      data: [...(old?.data || []), optimisticChat],
+      total: (old?.total || 0) + 1,
+    }));
+    
+    return { previousChats };
+  },
+  
+  onError: (err, payload, context) => {
+    queryClient.setQueryData(queryKeys.chats.list(), context?.previousChats);
+    toast.error('Failed to create chat');
+  },
+  
+  onSuccess: (newChat) => {
+    queryClient.invalidateQueries({ queryKey: queryKeys.chats.all });
+    toast.success('Chat created');
+  },
+});
+```
+
+---
+
+## Motion Animations
+
+### Message Entry with Stagger
+
+```tsx
+<motion.div
+  initial={{ opacity: 0, y: 20 }}
+  animate={{ opacity: 1, y: 0 }}
+  exit={{ opacity: 0, y: -20 }}
+  transition={{ 
+    duration: 0.3,
+    delay: index * 0.05, // Stagger effect
+  }}
+>
+```
+
+### Accordion (Project Plan) with Layout
+
+```tsx
+import { motion, AnimatePresence, LayoutGroup } from 'motion/react';
+
+<LayoutGroup>
+  <motion.div layout className="rounded-lg border border-border">
+    <motion.button
+      layout
+      onClick={() => setIsOpen(!isOpen)}
+      className="w-full p-4 flex items-center justify-between"
+    >
+      <motion.h3 layout className="font-semibold text-card-foreground">
+        {title}
+      </motion.h3>
+      <motion.span
+        animate={{ rotate: isOpen ? 180 : 0 }}
+        transition={{ duration: 0.2 }}
+      >
+        Γû╝
+      </motion.span>
+    </motion.button>
+    
+    <AnimatePresence>
+      {isOpen && (
+        <motion.div
+          initial={{ opacity: 0, height: 0 }}
+          animate={{ opacity: 1, height: 'auto' }}
+          exit={{ opacity: 0, height: 0 }}
+          transition={{ duration: 0.3, ease: 'easeInOut' }}
+        >
+          <div className="p-4 pt-0">
+            {children}
+          </div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  </motion.div>
+</LayoutGroup>
+```
+
+### Loading Indicator
+
+```tsx
+export function StreamingIndicator() {
+  return (
+    <motion.div className="flex gap-1">
+      {[0, 1, 2].map((i) => (
+        <motion.span
+          key={i}
+          className="w-2 h-2 bg-primary rounded-full"
+          animate={{ 
+            scale: [1, 1.2, 1],
+            opacity: [0.5, 1, 0.5]
+          }}
+          transition={{
+            duration: 0.8,
+            repeat: Infinity,
+            delay: i * 0.2,
+          }}
+        />
+      ))}
+    </motion.div>
+  );
+}
+```
+
+---
+
+## Streamdown (AI Markdown)
+
+```tsx
+import { Streamdown } from 'streamdown';
+
+<Streamdown
+  mode={isStreaming ? 'streaming' : 'static'}
+  isAnimating={isStreaming}
+  parseIncompleteMarkdown={true}
+  components={{
+    code: ({ className, children }) => {
+      const language = className?.replace('language-', '');
+      const code = String(children).replace(/\n$/, '');
+      
+      return (
+        <div className="relative group">
+          <SyntaxHighlighter language={language} style={oneDark}>
+            {code}
+          </SyntaxHighlighter>
+          <CopyButton code={code} />
+        </div>
+      );
+    },
+  }}
+>
+  {content}
+</Streamdown>
+```
+
+---
+
+## SSE Consumer (Complete Implementation)
+
+```typescript
+// web/src/hooks/useStreamingMessage.ts
+export function useStreamingMessage({ chatId, model }: Options) {
+  const [streamingContent, setStreamingContent] = useState('');
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const queryClient = useQueryClient();
+  const abortControllerRef = useRef<AbortController | null>(null);
+  
+  const abort = useCallback(() => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+      setIsStreaming(false);
+      toast.info('Stream cancelled');
+    }
+  }, []);
+  
+  const sendMessage = useCallback(async (content: string) => {
+    if (!chatId) {
+      toast.error('No chat selected');
+      return;
+    }
+    
+    setIsStreaming(true);
+    setStreamingContent('');
+    setError(null);
+    
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
+    
+    try {
+      const response = await fetch(`${API_BASE_URL}/chat/stream`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'richard', // Replace with actual user
+        },
+        body: JSON.stringify({
+          chatId,
+          content,
+          model,
+        }),
+        signal: abortController.signal,
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error('No response body');
+      
+      const decoder = new TextDecoder();
+      let buffer = '';
+      
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        
+        buffer += decoder.decode(value, { stream: true });
+        
+        // Process complete SSE messages (ending with \n\n)
+        const lines = buffer.split('\n\n');
+        buffer = lines.pop() || '';
+        
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6);
+            const chunk: LLMStreamChunk = JSON.parse(data);
+            
+            if (chunk.type === 'connected') {
+              // Connection established
+              console.log('[Streaming] Connected');
+            } else if (chunk.type === 'text' && chunk.content) {
+              setStreamingContent(prev => prev + chunk.content);
+            } else if (chunk.type === 'done') {
+              // Refetch messages to get saved assistant message
+              queryClient.invalidateQueries({
+                queryKey: queryKeys.chats.messages(chatId),
+              });
+              setIsStreaming(false);
+            } else if (chunk.type === 'error') {
+              setError(chunk.error || 'Stream error');
+              toast.error(chunk.error);
+              setIsStreaming(false);
+            }
+          }
+        }
+      }
+    } catch (err: any) {
+      if (err.name === 'AbortError') {
+        // User cancelled - this is expected
+        return;
+      }
+      
+      setError(err.message || 'Failed to stream');
+      toast.error('Failed to stream response');
+      setIsStreaming(false);
+    } finally {
+      abortControllerRef.current = null;
+    }
+  }, [chatId, model, queryClient]);
+  
+  return {
+    streamingContent,
+    isStreaming,
+    error,
+    sendMessage,
+    abort,
+  };
+}
+```
+
+---
+
+## React Patterns
+
+### ErrorBoundary Setup
+
+```typescript
+// App.tsx
+import { ErrorBoundary } from 'react-error-boundary';
+
+function ErrorFallback({ error, resetErrorBoundary }: Props) {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-background">
+      <div className="max-w-md rounded-lg border border-destructive bg-destructive/10 p-6">
+        <h2 className="text-2xl font-bold text-destructive">Something went wrong</h2>
+        <pre className="mt-2 max-h-40 overflow-auto rounded bg-muted p-3 text-xs">
+          {error.message}
+        </pre>
+        <button
+          onClick={resetErrorBoundary}
+          className="mt-4 w-full rounded bg-primary px-4 py-2 text-primary-foreground"
+        >
+          Try again
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function App() {
+  return (
+    <ErrorBoundary FallbackComponent={ErrorFallback}>
+      <QueryClientProvider client={queryClient}>
+        <RouterProvider router={router} />
+        {process.env.NODE_ENV === 'development' && <ReactQueryDevtools />}
+        <Toaster position="top-right" richColors />
+      </QueryClientProvider>
+    </ErrorBoundary>
+  );
+}
+```
+
+### Custom Hooks Pattern
+
+```typescript
+// Extract stateful logic into hooks
+export function useChat(): UseChatReturn {
+  const [selectedChatId, setSelectedChatId] = useLocalStorage<string | null>(
+    STORAGE_KEYS.SELECTED_CHAT_ID,
+    null
+  );
+  
+  const chatsQuery = useChatsQuery();
+  const messagesQuery = useMessagesQuery(selectedChatId);
+  const createChatMutation = useCreateChatMutation();
+  const streaming = useStreamingMessage({ chatId: selectedChatId });
+  
+  const createChat = useCallback(async () => {
+    const newChat = await createChatMutation.mutateAsync({});
+    setSelectedChatId(newChat.id);
+  }, [createChatMutation, setSelectedChatId]);
+  
+  return {
+    selectedChatId,
+    chats: chatsQuery.data?.data || [],
+    messages: messagesQuery.data?.data || [],
+    isLoadingChats: chatsQuery.isPending,
+    isLoadingMessages: messagesQuery.isPending,
+    selectChat: setSelectedChatId,
+    createChat,
+    sendMessage: streaming.sendMessage,
+    streamingContent: streaming.streamingContent,
+    isStreaming: streaming.isStreaming,
+    abortStream: streaming.abort,
+  };
+}
+```
+
+### Performance Patterns
+
+```typescript
+// useCallback for stable references
+const handleSend = useCallback((content: string) => {
+  sendMessage(content);
+}, [sendMessage]);
+
+// useMemo for expensive calculations
+const sortedChats = useMemo(
+  () => chats.sort((a, b) => 
+    new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+  ),
+  [chats]
+);
+
+// React.memo for expensive components
+const MemoizedMessageList = React.memo(MessageList);
+```
+
+### State Management Hierarchy
+
+1. **URL state** (`useParams`) - Navigation/deep-linking
+2. **Query state** (`useQuery`) - Server data
+3. **Local state** (`useState`) - Component-specific
+4. **Persisted state** (`useLocalStorage`) - Cross-session
+
+---
+
+## Must-Do Checklist
+
+- [ ] Semantic tokens only (no bg-gray-*, text-white)
+- [ ] Query keys from `queryKeys.ts`
+- [ ] Handle isPending, isError, data states
+- [ ] Types match `web/src/types/chat.ts`
+- [ ] Headings have explicit text color
+- [ ] ErrorBoundary wraps app
+- [ ] QueryClient configured with proper options
+- [ ] useCallback for event handlers
+- [ ] AbortController for cancelable requests
+
+## Context7 IDs
+
+- TanStack Query: `/websites/tanstack_query_v5`
+- Motion: `/websites/motion-dev-docs`
+- Zod: `/colinhacks/zod`

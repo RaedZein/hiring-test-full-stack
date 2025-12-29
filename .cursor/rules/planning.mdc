@@ -1,0 +1,56 @@
+﻿---
+description: "Plan management and agent behavior"
+alwaysApply: true
+---
+
+# Agent Protocol
+
+## Plan Location
+
+`docs/ai/plans/ACTIVE.md`
+
+## Plan Lifecycle
+
+### On Task Start
+
+1. Read ACTIVE.md
+2. If IDLE ΓåÆ create plan from TEMPLATE.md
+3. Run `npm run repomap`
+4. Update status ΓåÆ IN_PROGRESS
+
+### During Task
+
+- Log significant changes to ACTIVE.md
+- Check REPO_MAP.md for navigation
+- Use Serena MCP for code understanding
+
+### On Task Complete
+
+1. Run `npm run repomap` (if files added/removed)
+2. Update status ΓåÆ DONE
+3. Clear plan for next task
+
+## Code Output Rules
+
+**Required:**
+- No console.log / debug logs
+- No commented-out code
+- Minimal comments (explain WHY, not WHAT)
+- Consistent formatting
+
+**Allowed:**
+- JSDoc on public APIs only
+- Section separators in large files
+
+## Quality Gate
+
+```bash
+cd server && npm run build:ts
+cd web && npm run build
+```
+
+## Reference Files
+
+- Guidelines: `AGENTS.md`
+- Commands: `docs/ai/runbook/COMMANDS.md`
+- Repo map: `docs/ai/maps/REPO_MAP.md`
