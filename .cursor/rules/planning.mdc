@@ -7,28 +7,53 @@ alwaysApply: true
 
 ## Plan Location
 
+**CRITICAL**: Centralized plan location for ALL agents:
 `docs/ai/plans/ACTIVE.md`
+
+This file is the single source of truth. Whether using Cursor plan mode, Claude Code, or any other tool, always read from and update this file.
 
 ## Plan Lifecycle
 
 ### On Task Start
 
-1. Read ACTIVE.md
-2. If IDLE ΓåÆ create plan from TEMPLATE.md
-3. Run `npm run repomap`
-4. Update status ΓåÆ IN_PROGRESS
+1. **Read** `docs/ai/plans/ACTIVE.md`
+2. If status is IDLE ΓåÆ create plan from `docs/ai/plans/TEMPLATE.md`
+3. Generate repo map (MCP tool if available, else: `python .repomapper/repomap.py . | Out-File -FilePath docs/ai/maps/REPO_MAP.md -Encoding utf8`)
+4. **Update** `docs/ai/plans/ACTIVE.md`:
+   - Set status ΓåÆ IN_PROGRESS
+   - Update "Last updated" timestamp
+   - Add entry to Log table: `| {date} | Started | Initial plan created |`
 
 ### During Task
 
-- Log significant changes to ACTIVE.md
+- **MANDATORY**: Log significant changes to `docs/ai/plans/ACTIVE.md` log table
+- Update checklist items as work progresses
 - Check REPO_MAP.md for navigation
-- Use Serena MCP for code understanding
+- **Use Serena MCP tools (if available)** for code understanding:
+  - `mcp_serena_find_symbol` - Find symbols by name
+  - `mcp_serena_search_for_pattern` - Search codebase
+  - `mcp_serena_get_symbols_overview` - Understand file structure
+  - `mcp_serena_find_referencing_symbols` - Find usages
+- **Fallback to standard tools** if MCP tools unavailable
 
 ### On Task Complete
 
-1. Run `npm run repomap` (if files added/removed)
-2. Update status ΓåÆ DONE
-3. Clear plan for next task
+1. **Update** `docs/ai/plans/ACTIVE.md`:
+   - Mark all deliverables complete in checklist
+   - Set status ΓåÆ DONE
+   - Add completion entry to Log table: `| {date} | Completed | All deliverables finished |`
+2. Generate repo map (if files added/removed, MCP tool if available, else Python script)
+3. **Clear plan** for next task (reset to IDLE state with template message)
+
+### MCP Tool Usage
+
+**Strategy**: Try MCP tools first, automatically fallback to standard tools if unavailable.
+
+**Priority order**:
+1. **Serena MCP** - Code navigation and symbol operations (fallback: `grep`, `codebase_search`, `read_file`)
+2. **RepoMapper MCP** - Repository map generation (fallback: Python script)
+3. **Context7 MCP** - Library documentation (fallback: web search)
+4. **Standard tools** - Always available fallback
 
 ## Code Output Rules
 

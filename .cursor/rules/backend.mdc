@@ -122,6 +122,15 @@ export const chatRepository = {
 
 ## LLM Provider Abstraction (Strategy Pattern)
 
+**CRITICAL RULES:**
+1. Γ¥î **NEVER hardcode model lists** - Always fetch from provider APIs
+2. Γ£à **Only provider names as types** - `'anthropic' | 'openai' | 'gemini'`
+3. Γ£à **Dynamic model discovery** - Use `client.models.list()` for all providers
+4. Γ£à **Configuration in JSON files** - User config and encrypted API keys stored on backend
+5. Γ£à **Default provider in ENV** - `DEFAULT_LLM_PROVIDER` environment variable
+
+See `docs/ai/ARCHITECTURE.md` ΓåÆ Configuration Architecture section.
+
 ### Provider Interface
 
 ```typescript
@@ -129,13 +138,15 @@ export const chatRepository = {
 export interface LLMProvider {
   name: string;
   type: LLMProviderType;
-  
+
   streamResponse(
     messages: LLMMessage[],
     model?: string
   ): AsyncIterable<LLMStreamChunk>;
-  
-  listModels(apiKey?: string): Promise<ModelInfo[]>;
+
+  // CRITICAL: Fetch models from provider API dynamically
+  // NO hardcoded model lists allowed
+  listModels(apiKey?: string): Promise<LLMModel[]>;
   getDefaultModel(): string;
 }
 
@@ -198,12 +209,18 @@ export class AnthropicProvider implements LLMProvider {
     yield { type: 'done' };
   }
   
-  async listModels(): Promise<ModelInfo[]> {
-    return [
-      { id: 'claude-sonnet-4-20250514', name: 'Claude Sonnet 4' },
-      { id: 'claude-3-7-sonnet-20250219', name: 'Claude 3.7 Sonnet' },
-      { id: 'claude-3-5-haiku-20241022', name: 'Claude 3.5 Haiku' },
-    ];
+  async listModels(apiKey?: string): Promise<LLMModel[]> {
+    // CRITICAL: Fetch from Anthropic API, never hardcode
+    const client = apiKey ? new Anthropic({ apiKey }) : this.client;
+    const response = await client.models.list();
+
+    return response.data.map(model => ({
+      id: model.id,
+      name: model.display_name || model.id,
+      provider: 'anthropic',
+      maxTokens: 200000, // Default, update based on model metadata
+      createdAt: model.created_at,
+    }));
   }
   
   getDefaultModel(): string {
@@ -252,16 +269,20 @@ export class OpenAIProvider implements LLMProvider {
     yield { type: 'done' };
   }
   
-  async listModels(apiKey?: string): Promise<ModelInfo[]> {
+  async listModels(apiKey?: string): Promise<LLMModel[]> {
+    // CRITICAL: Fetch from OpenAI API, never hardcode
     const client = apiKey ? new OpenAI({ apiKey }) : this.client;
     const response = await client.models.list();
+
     return response.data
-      .filter(m => m.id.includes('gpt'))
+      .filter(m => m.id.includes('gpt')) // Filter for chat models
       .map(m => ({
         id: m.id,
-        name: m.id,
-        created: m.created,
-        owned_by: m.owned_by,
+        name: m.id, // OpenAI doesn't provide display names
+        provider: 'openai',
+        maxTokens: 128000, // Default, varies by model
+        createdAt: new Date(m.created * 1000).toISOString(),
+        ownedBy: m.owned_by,
       }));
   }
   
@@ -317,12 +338,23 @@ export class GeminiProvider implements LLMProvider {
     yield { type: 'done' };
   }
   
-  async listModels(): Promise<ModelInfo[]> {
-    return [
-      { id: 'gemini-2.0-flash-exp', name: 'Gemini 2.0 Flash' },
-      { id: 'gemini-exp-1206', name: 'Gemini Exp 1206' },
-      { id: 'gemini-1.5-pro', name: 'Gemini 1.5 Pro' },
-    ];
+  async listModels(apiKey?: string): Promise<LLMModel[]> {
+    // CRITICAL: Fetch from Gemini API using OpenAI-compatible endpoint
+    const client = new OpenAI({
+      apiKey: apiKey || process.env.GOOGLE_AI_API_KEY!,
+      baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai/',
+    });
+
+    const response = await client.models.list();
+
+    return response.data.map(m => ({
+      id: m.id,
+      name: m.id, // Gemini uses model ID as name
+      provider: 'gemini',
+      maxTokens: 32000, // Default, varies by model
+      createdAt: new Date(m.created * 1000).toISOString(),
+      ownedBy: 'google',
+    }));
   }
   
   getDefaultModel(): string {
