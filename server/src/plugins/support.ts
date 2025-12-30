@@ -3,9 +3,14 @@ import {testUsers} from "../domain/test-users";
 
 export default fp(async (fastify) => {
   fastify.addHook('preHandler', async (request, reply) => {
+    // Skip auth for CORS preflight requests
+    if (request.method === 'OPTIONS') {
+      return;
+    }
+
     const userId = request.headers.authorization;
     if (!userId || !(userId in testUsers)) {
-      reply.status(401).send();
+      reply.status(401).send({ error: 'Unauthorized' });
       return;
     }
     request.userId = userId as keyof typeof testUsers;

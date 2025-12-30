@@ -171,10 +171,6 @@ export function ModelSelector({
     );
   }
 
-  const selectedModel = selectedModelId
-    ? modelsData.models.find((m) => m.id === selectedModelId)
-    : undefined;
-
   // Separate configured and unconfigured providers
   const configuredProviders = PROVIDER_ORDER.filter(
     (p) => (groupedModels[p]?.length ?? 0) > 0

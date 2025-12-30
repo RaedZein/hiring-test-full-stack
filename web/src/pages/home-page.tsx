@@ -151,7 +151,7 @@ function ChatWindow({ chatId, defaultModelId }: ChatWindowProps) {
         </motion.div>
       )}
 
-      <div className="flex-1 min-h-0">
+      <div className="flex-1 min-h-0 overflow-y-auto">
         {!hasMessages ? (
           <div className="h-full flex items-center justify-center">
             <motion.div

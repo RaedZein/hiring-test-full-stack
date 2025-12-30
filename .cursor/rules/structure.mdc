@@ -1,0 +1,301 @@
+# Project Structure Rules
+
+## Feature-Based Organization
+
+**All code MUST be organized by feature domain**, not by technical layer.
+
+### Core Principle
+
+Code that changes together should live together. Features are isolated, self-contained modules.
+
+### ✅ DO: Organize by Feature
+
+- `features/chat/` - Everything chat-related (components, hooks, API, types)
+- `features/models/` - Everything model-related (model selector, API config)
+- `features/project-plan/` - Everything project-plan-related (preview, parser)
+
+### ❌ DON'T: Mix Feature Code in Shared Folders
+
+- Don't put chat-specific components in `components/`
+- Don't put chat-specific hooks in `hooks/`
+- Don't put feature-specific types in top-level `types/`
+
+---
+
+## Feature Structure Template
+
+```
+features/<feature-name>/
+├── components/      # UI components for this feature ONLY
+│   ├── feature-main.tsx
+│   ├── feature-detail.tsx
+│   └── feature-item.tsx
+├── hooks/          # Hooks used ONLY by this feature
+│   ├── useFeature.ts
+│   └── useFeatureData.ts
+├── api/            # TanStack Query queries/mutations for this feature
+│   ├── queries.ts   # useFeatureQuery hooks
+│   └── mutations.ts # useFeatureMutation hooks
+├── lib/            # Feature-specific utilities/helpers
+│   └── feature-utils.ts
+└── types.ts        # Types used ONLY by this feature
+```
+
+### Example: Chat Feature
+
+```
+features/chat/
+├── components/
+│   ├── chat-input-box.tsx
+│   ├── chat-message-list.tsx
+│   ├── chat-sidebar.tsx
+│   ├── message.tsx
+│   ├── message-content.tsx
+│   └── typing-indicator.tsx
+├── hooks/
+│   ├── useChat.ts
+│   └── useSelectedChat.ts
+├── api/
+│   ├── queries.ts    # useChatsQuery, useChatQuery
+│   └── mutations.ts  # useCreateChatMutation, useDeleteChatMutation
+└── types.ts          # Chat, Message, ChatSummary types
+```
+
+---
+
+## When to Use Shared Folders
+
+**components/**: Only for components used by **3+ features**
+
+**hooks/**: Only for hooks used by **3+ features**
+
+**lib/**: Only for utilities used by **3+ features**
+
+**types/**: Only for types used by **3+ features**
+
+### Shared Components Categories
+
+```
+components/
+├── ui/              # shadcn/ui primitives (button, input, etc.)
+├── layout/          # Navigation, header, footer
+└── skeletons/       # Loading skeletons used across features
+```
+
+---
+
+## Import Rules
+
+### ✅ Good: Feature imports from own folder
+
+```typescript
+// Within features/chat/components/message.tsx
+import { useChat } from '../hooks/useChat';
+import type { Message } from '../types';
+```
+
+### ✅ Good: Import from other features via absolute path
+
+```typescript
+// In features/chat/components/chat-input.tsx
+import { useModelsQuery } from '@/features/models/api/queries';
+```
+
+### ✅ Good: Import shared components
+
+```typescript
+import { Button } from '@/components/ui/button';
+import { Navbar } from '@/components/layout/navbar';
+```
+
+### ❌ Bad: Reaching into other feature's internals
+
+```typescript
+// DON'T traverse up/down directory tree
+import { ChatMessage } from '../../chat/components/message';
+```
+
+---
+
+## Component Placement Decision Tree
+
+```
+Is component used by 3+ features?
+├─ YES → components/
+└─ NO  → features/<feature>/components/
+
+Is component a shadcn UI primitive?
+└─ YES → components/ui/
+
+Is component layout/navigation?
+└─ YES → components/layout/
+
+Is component feature-specific?
+└─ YES → features/<feature>/components/
+```
+
+---
+
+## API Layer Organization
+
+### Pattern: Query Options + Hooks
+
+```typescript
+// features/chat/api/queries.ts
+import { queryOptions, useQuery } from '@tanstack/react-query';
+import { apiClient } from '@/lib/api-client';
+import type { Chat, ChatSummary } from '../types';
+
+// Query options (reusable, type-safe)
+export const chatsOptions = queryOptions({
+  queryKey: ['chats'],
+  queryFn: async (): Promise<ChatSummary[]> => {
+    const response = await apiClient.get('/chats');
+    return response.data.chats;
+  },
+  staleTime: 1000 * 60 * 2,
+});
+
+// Query hook (convenience wrapper)
+export function useChatsQuery() {
+  return useQuery(chatsOptions);
+}
+
+// Chat detail query (parameterized)
+export const chatOptions = (chatId: string) => queryOptions({
+  queryKey: ['chats', chatId],
+  queryFn: async (): Promise<Chat> => {
+    const response = await apiClient.get(`/chats/${chatId}`);
+    return response.data;
+  },
+});
+
+export function useChatQuery(chatId: string) {
+  return useQuery(chatOptions(chatId));
+}
+```
+
+### Pattern: Mutations with Cache Invalidation
+
+```typescript
+// features/chat/api/mutations.ts
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { apiClient } from '@/lib/api-client';
+
+export function useCreateChatMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (message: string) => {
+      const response = await apiClient.post('/chats', { message });
+      return response.data;
+    },
+    onSettled: () => {
+      // Invalidate to refetch
+      queryClient.invalidateQueries({ queryKey: ['chats'] });
+    },
+  });
+}
+```
+
+---
+
+## Type Organization
+
+### ✅ Feature-Specific Types
+
+```typescript
+// features/chat/types.ts
+export type Chat = {
+  id: string;
+  messages: Message[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type Message = {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  createdAt: string;
+};
+
+export type ChatSummary = Pick<Chat, 'id' | 'createdAt' | 'updatedAt'>;
+```
+
+### ✅ Global Types (use sparingly)
+
+```typescript
+// types/common.ts - ONLY truly global types
+export type User = {
+  id: string;
+  name: string;
+};
+
+export type ApiError = {
+  message: string;
+  code: string;
+};
+```
+
+### ❌ Anti-Pattern: Shared Feature Types
+
+```typescript
+// ❌ DON'T create types/chat.ts for chat feature
+// Put it in features/chat/types.ts instead
+```
+
+---
+
+## File Naming Conventions
+
+- Components: `kebab-case.tsx` (e.g., `chat-message.tsx`)
+- Hooks: `camelCase.ts` with `use` prefix (e.g., `useChat.ts`)
+- Utilities: `kebab-case.ts` (e.g., `api-client.ts`)
+- Types: `types.ts` (within feature) or `common.ts` (global)
+
+---
+
+## Migration Strategy
+
+When moving existing code to feature-based structure:
+
+1. **Identify feature boundaries** (chat, models, project-plan)
+2. **Create feature folder** with subfolders (components, hooks, api, lib)
+3. **Move files** to appropriate subfolder
+4. **Update imports** to use new paths
+5. **Verify compilation** (`npm run build`)
+6. **Test functionality** in browser
+
+### Migration Order
+
+1. Start with **smallest feature** (project-plan)
+2. Then **medium features** (models)
+3. Finally **largest feature** (chat)
+
+---
+
+## Benefits
+
+| Aspect | Before (Mixed) | After (Feature-Based) |
+|--------|---------------|----------------------|
+| **Find code** | Search 3-4 folders | One feature folder |
+| **Add feature** | Touch 4+ folders | Add one folder |
+| **Delete feature** | Hunt across folders | Delete one folder |
+| **Team collaboration** | Merge conflicts | Isolated features |
+| **Code reuse clarity** | Unclear | Only `components/` shared |
+| **Onboarding** | Hard to navigate | Clear boundaries |
+
+---
+
+## Enforcement
+
+Agents MUST follow this structure for:
+- All new features
+- All feature modifications
+- All code reviews
+
+Before creating a new file, ask:
+1. Is this feature-specific? → Put in `features/<feature>/`
+2. Is this shared by 3+ features? → Put in shared folder
+3. When in doubt → Put in feature folder (easier to extract later)

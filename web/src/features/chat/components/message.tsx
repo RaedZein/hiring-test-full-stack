@@ -5,9 +5,7 @@ import {BotIcon, UserIcon} from "lucide-react";
 import { MessageContent } from "./message-content";
 import type { Message as MessageType } from "../types";
 
-export type Message = { role: "user" | "assistant"; content: string };
-
-export function MessageContainer({ role, children }: React.PropsWithChildren<{ role: Message["role"] }>) {
+export function MessageContainer({ role, children }: React.PropsWithChildren<{ role: MessageType["role"] }>) {
     return (
         <div className={cn("flex flex-col gap-2", role === "user" ? "items-end" : "items-start")}>
             <div

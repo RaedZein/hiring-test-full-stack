@@ -51,10 +51,22 @@ function generateId(): string {
 }
 
 /**
- * Get default model ID from environment variable
+ * Get default model ID from user config
  */
 function getDefaultModelId(): string {
-  return process.env.DEFAULT_MODEL_ID || 'claude-sonnet-4-20250514';
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const llmConfigService = require('../services/llm-config.service');
+    const selectedModelId = llmConfigService.getSelectedModelId();
+
+    if (selectedModelId) {
+      return selectedModelId;
+    }
+  } catch {
+    // If import fails, return empty
+  }
+
+  return '';
 }
 
 /**
@@ -69,7 +81,7 @@ export function createChat(
 
   const finalModelId = modelId || getDefaultModelId();
   if (!finalModelId) {
-    throw new Error('Model ID is required. Please select a model or configure DEFAULT_MODEL_ID environment variable.');
+    throw new Error('Model ID is required. Please select a model or configure a default.');
   }
 
   const chat: Chat = {

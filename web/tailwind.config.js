@@ -2,8 +2,11 @@ const { fontFamily } = require("tailwindcss/defaultTheme")
 
 /** @type {import('tailwindcss').Config} */
 module.exports = {
-  darkMode: 'selector',
-  content: ["src/**/*.{ts,tsx}"],
+  darkMode: ['selector', 'class'],
+  content: [
+    "src/**/*.{ts,tsx}",
+    "./node_modules/streamdown/dist/*.js",
+  ],
   variants: {
     extend: {
       display: ["group-hover"],

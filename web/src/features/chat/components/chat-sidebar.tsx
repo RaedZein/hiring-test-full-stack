@@ -31,8 +31,8 @@ export function ChatSidebar(props: Props) {
               className={'w-full text-left justify-start'}
               onClick={() => props.onSelectChat?.(chat.id)}
             >
-              <MessagesSquareIcon className={'w-5 h-5 me-2'} />
-              {chat.title}
+              <MessagesSquareIcon className={'w-5 h-5 me-2 shrink-0'} />
+              <span className={'truncate'}>{chat.title}</span>
             </Button>
           </div>
         ))}

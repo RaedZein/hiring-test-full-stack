@@ -67,47 +67,7 @@ export function useChat(chatId: string): UseChatResult {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chat, chatId]);
 
-  const connectToActiveStream = async (id: string) => {
-    try {
-      const response = await fetch(`${API_BASE}/chats/${id}/stream`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: 'richard',
-        },
-        body: JSON.stringify({}),
-      });
-
-      await processSSEStream(response);
-    } catch (error: any) {
-      if (error.name !== 'AbortError') {
-        console.error('Error connecting to stream:', error);
-        setIsStreaming(false);
-      }
-    }
-  };
-
-  const startStreamForPendingMessage = async (id: string) => {
-    try {
-      const response = await fetch(`${API_BASE}/chats/${id}/stream`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: 'richard',
-        },
-        body: JSON.stringify({}),
-      });
-
-      await processSSEStream(response);
-    } catch (error: any) {
-      if (error.name !== 'AbortError') {
-        console.error('Error starting stream:', error);
-        setIsStreaming(false);
-      }
-    }
-  };
-
-  const processSSEStream = async (response: Response) => {
+  const processSSEStream = useCallback(async (response: Response) => {
     const reader = response.body!.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
@@ -196,6 +156,46 @@ export function useChat(chatId: string): UseChatResult {
       reader.releaseLock();
       setIsStreaming(false);
     }
+  }, [queryClient]);
+
+  const connectToActiveStream = async (id: string) => {
+    try {
+      const response = await fetch(`${API_BASE}/chats/${id}/stream`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'richard',
+        },
+        body: JSON.stringify({}),
+      });
+
+      await processSSEStream(response);
+    } catch (error: any) {
+      if (error.name !== 'AbortError') {
+        console.error('Error connecting to stream:', error);
+        setIsStreaming(false);
+      }
+    }
+  };
+
+  const startStreamForPendingMessage = async (id: string) => {
+    try {
+      const response = await fetch(`${API_BASE}/chats/${id}/stream`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'richard',
+        },
+        body: JSON.stringify({}),
+      });
+
+      await processSSEStream(response);
+    } catch (error: any) {
+      if (error.name !== 'AbortError') {
+        console.error('Error starting stream:', error);
+        setIsStreaming(false);
+      }
+    }
   };
 
   const sendMessage = useCallback(
@@ -226,7 +226,7 @@ export function useChat(chatId: string): UseChatResult {
         setIsStreaming(false);
       }
     },
-    [chatId]
+    [chatId, processSSEStream]
   );
 
   return {
