@@ -2,10 +2,11 @@ import React from "react";
 import {cn} from "../lib/utils";
 import Spinner from "./ui/spinner";
 import {BotIcon, UserIcon} from "lucide-react";
+import type { MessageRole } from "../types/chat";
 
-export type Message = { role: "user" | "assistant"; content: string };
+export type Message = { role: MessageRole; content: string };
 
-export function MessageContainer({ role, children }: React.PropsWithChildren<{ role: Message["role"] }>) {
+export function MessageContainer({ role, children }: React.PropsWithChildren<{ role: MessageRole }>) {
     return (
         <div className={cn("flex flex-col gap-2", role === "user" ? "items-end" : "items-start")}>
             <div

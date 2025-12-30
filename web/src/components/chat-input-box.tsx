@@ -3,12 +3,19 @@ import {Button} from "./ui/button";
 import {SendIcon} from "lucide-react";
 import {Textarea} from "./ui/textarea";
 
-export function ChatInputBox({onSend}: { onSend: (message: string) => void }) {
+interface ChatInputBoxProps {
+  onSend: (message: string) => void;
+  disabled?: boolean;
+  isStreaming?: boolean;
+}
+
+export function ChatInputBox({ onSend, disabled = false, isStreaming = false }: ChatInputBoxProps) {
   const [input, setInput] = useState("");
   const textAreaRef = useRef<HTMLTextAreaElement>(null);
 
   const handleSend = () => {
-    onSend(input);
+    if (!input.trim() || disabled || isStreaming) return;
+    onSend(input.trim());
     setInput("");
   };
 
@@ -43,9 +50,9 @@ export function ChatInputBox({onSend}: { onSend: (message: string) => void }) {
               onKeyDown={onKeyDown}
               placeholder="Type your message..."
           />
-          <Button onClick={handleSend} disabled={!input.trim()}>
+          <Button onClick={handleSend} disabled={!input.trim() || disabled || isStreaming}>
             <SendIcon className={"me-2 h-5 w-5"}/>
-            Send
+            {isStreaming ? 'Streaming...' : 'Send'}
           </Button>
         </div>
       </div>
