@@ -2,7 +2,7 @@
 
 **Status**: IN_PROGRESS
 **Started**: 2025-12-29
-**Phase**: Phase 3 - Feature-Based Architecture Refactoring
+**Phase**: Phase 4 - Project Plan Preview Feature
 
 ---
 
@@ -33,17 +33,20 @@ Build a full-stack LLM chat application with:
 | 2 | Backend Implementation | ✅ DONE | Providers, services, routes |
 | 3 | Frontend Components | ✅ DONE | Components, hooks, React Query |
 | 3 | Feature Refactoring | ✅ DONE | Migrated to features/ structure |
-| 4 | Project Plan Preview | ⏳ PENDING | Next commit |
+| 4 | Project Plan Preview | ✅ DONE | Added project-plan feature with streaming |
+| 5 | LLM Config Service | ⏳ PENDING | Next commit |
 
 ---
 
-## Current Phase: Phase 3 - Feature-Based Architecture Refactoring
+## Current Phase: Phase 4 - Project Plan Preview Feature
 
 ### What Was Done
-- ✅ Moved queries/mutations to `features/chat/api/` and `features/models/api/`
-- ✅ Moved hooks to `features/chat/hooks/`
-- ✅ Moved ModelSelector to `features/models/components/`
-- ✅ Created feature-based folder structure
+- ✅ Created `features/project-plan` with preview components
+- ✅ Added plan parser for markdown parsing
+- ✅ Moved chat components (message, message-content, chat-message-list) to features/
+- ✅ Added typing indicator component
+- ✅ Added chat types module
+- ✅ Added system prompts for LLM providers
 
 ### Files Reorganized
 - `web/src/data/queries/chats.ts` → `web/src/features/chat/api/queries.ts`

@@ -1,12 +1,13 @@
 import React from "react";
-import {cn} from "../lib/utils";
-import Spinner from "./ui/spinner";
+import {cn} from "../../../lib/utils";
+import Spinner from "../../../components/ui/spinner";
 import {BotIcon, UserIcon} from "lucide-react";
-import type { MessageRole } from "../types/chat";
+import { MessageContent } from "./message-content";
+import type { Message as MessageType } from "../types";
 
-export type Message = { role: MessageRole; content: string };
+export type Message = { role: "user" | "assistant"; content: string };
 
-export function MessageContainer({ role, children }: React.PropsWithChildren<{ role: MessageRole }>) {
+export function MessageContainer({ role, children }: React.PropsWithChildren<{ role: Message["role"] }>) {
     return (
         <div className={cn("flex flex-col gap-2", role === "user" ? "items-end" : "items-start")}>
             <div
@@ -23,6 +24,23 @@ export function MessageContainer({ role, children }: React.PropsWithChildren<{ r
             </div>
         </div>
     );
+}
+
+interface MessageProps {
+  message: MessageType;
+  isStreaming?: boolean;
+}
+
+export function Message({ message, isStreaming }: MessageProps) {
+  return (
+    <MessageContainer role={message.role}>
+      {message.role === 'user' ? (
+        <div className="text-sm">{message.content}</div>
+      ) : (
+        <MessageContent content={message.content} isStreaming={isStreaming} />
+      )}
+    </MessageContainer>
+  );
 }
 
 export function AssistantLoadingIndicator() {
