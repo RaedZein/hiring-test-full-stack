@@ -1,13 +1,17 @@
-import { FastifyPluginAsync, FastifyReply } from 'fastify';
+import { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import { randomUUID } from 'crypto';
 import type {
   ChatListResponse,
   LLMStreamChunk,
   LLMProviderType,
+  Message,
 } from '../../types';
 import * as chatService from '../../services/chat.service';
 import * as chatRepository from '../../repositories/chat.repository';
+import * as llmConfigService from '../../services/llm-config.service';
+import { streamManager } from '../../services/stream-manager.service';
 import { getLLMProvider } from '../../providers/llm';
+import { BASE_SYSTEM_PROMPT } from '../../providers/llm/system-prompts';
 
 const SSE_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -26,13 +30,83 @@ function sendChunk(reply: FastifyReply, chunk: LLMStreamChunk): void {
   reply.raw.write(`data: ${JSON.stringify(chunk)}\n\n`);
 }
 
+interface StreamContext {
+  chatId: string;
+  messages: Message[];
+  modelId: string;
+  assistantMessageId: string;
+  userMessage?: string;
+  request: FastifyRequest;
+  reply: FastifyReply;
+}
+
+async function executeStream(ctx: StreamContext): Promise<void> {
+  const { chatId, messages, modelId, assistantMessageId, userMessage, request, reply } = ctx;
+
+  try {
+    sendChunk(reply, { type: 'connected', messageId: assistantMessageId });
+
+    streamManager.startStream(chatId, assistantMessageId);
+    streamManager.subscribe(chatId, reply.raw);
+
+    const providerType = getProviderTypeForModel(modelId);
+    const provider = getLLMProvider(providerType);
+
+    for await (const text of provider.streamCompletion(
+      messages,
+      modelId,
+      BASE_SYSTEM_PROMPT
+    )) {
+      streamManager.appendChunk(chatId, text);
+    }
+
+    const fullContent = streamManager.completeStream(chatId);
+
+    chatRepository.addMessageWithoutSave(chatId, {
+      id: assistantMessageId,
+      role: 'assistant',
+      content: fullContent,
+    });
+
+    const chat = chatRepository.getChat(chatId);
+    if (userMessage && chat?.title === 'New Chat') {
+      const title = generateChatTitle(userMessage);
+      chatRepository.updateChatWithoutSave(chatId, { title });
+    }
+
+    chatRepository.persistChat(chatId);
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+    request.log.error(error, 'Error in chat stream');
+
+    const partialContent = streamManager.failStream(chatId, errorMessage);
+
+    if (partialContent) {
+      chatRepository.addMessageWithoutSave(chatId, {
+        role: 'assistant',
+        content: partialContent,
+      });
+      chatRepository.persistChat(chatId);
+    }
+  }
+}
+
 function getProviderTypeForModel(modelId: string): LLMProviderType {
+  const customConfig = llmConfigService.getCustomProvider();
+  if (customConfig && customConfig.modelId === modelId) {
+    return 'custom';
+  }
+
   if (modelId.includes('claude')) return 'anthropic';
   if (modelId.includes('gpt')) return 'openai';
   if (modelId.includes('gemini')) return 'gemini';
 
-  const defaultProvider = (process.env.DEFAULT_LLM_PROVIDER || 'anthropic') as LLMProviderType;
-  return defaultProvider;
+  const selectedProvider = llmConfigService.getSelectedProvider();
+  if (selectedProvider) {
+    return selectedProvider;
+  }
+
+  throw new Error(`Cannot determine provider for model: ${modelId}. Please configure a default provider.`);
 }
 
 function generateChatTitle(firstMessage: string): string {
@@ -55,12 +129,20 @@ const chats: FastifyPluginAsync = async (fastify): Promise<void> => {
   });
 
   fastify.post<{
-    Body: { modelId?: string };
+    Body: { message: string };
   }>('/', async (request, reply) => {
     const userId = request.userId;
-    const { modelId } = request.body;
+    const { message } = request.body;
 
-    const chat = chatService.createChat(userId, modelId);
+    const selectedModelId = llmConfigService.getSelectedModelId();
+    const chat = chatService.createChat(userId, selectedModelId);
+
+    chatRepository.addMessageWithoutSave(chat.id, {
+      role: 'user',
+      content: message,
+    });
+
+    chatRepository.persistChat(chat.id);
 
     reply.code(201);
     return { id: chat.id };
@@ -68,25 +150,56 @@ const chats: FastifyPluginAsync = async (fastify): Promise<void> => {
 
   fastify.post<{
     Params: { id: string };
-    Body: { message: string; modelId?: string };
+    Body: { message?: string };
   }>('/:id/stream', async (request, reply) => {
     const userId = request.userId;
     const { id: chatId } = request.params;
-    const { message, modelId: overrideModelId } = request.body;
-
-    if (!message || typeof message !== 'string' || message.trim() === '') {
-      return reply.code(400).send({ error: 'Message is required' });
-    }
+    const { message } = request.body;
 
     const chat = chatService.getChat(userId, chatId);
+    const currentChat = chatRepository.getChat(chatId);
+    const currentMessages = currentChat?.messages || [];
 
-    const finalModelId = overrideModelId || chat.modelId;
-    const providerType = getProviderTypeForModel(finalModelId);
-    const provider = getLLMProvider(providerType);
+    if (!message) {
+      const lastMessage = currentMessages[currentMessages.length - 1];
+      const needsResponse = lastMessage && lastMessage.role === 'user';
+
+      if (streamManager.hasActiveStream(chatId)) {
+        setupSSEResponse(reply);
+        const streamInfo = streamManager.subscribe(chatId, reply.raw);
+        if (streamInfo) {
+          const initChunk: LLMStreamChunk = {
+            type: 'init',
+            content: streamInfo.accumulated,
+            messageId: streamInfo.messageId,
+            chatId,
+          };
+          sendChunk(reply, initChunk);
+        }
+        return;
+      }
+
+      if (needsResponse) {
+        setupSSEResponse(reply);
+        const assistantMessageId = randomUUID();
+        await executeStream({
+          chatId,
+          messages: currentMessages,
+          modelId: chat.modelId,
+          assistantMessageId,
+          userMessage: lastMessage.content,
+          request,
+          reply,
+        });
+        return;
+      }
+
+      return { hasActiveStream: false };
+    }
 
     chatRepository.addMessageWithoutSave(chatId, {
       role: 'user',
-      content: message.trim(),
+      content: message,
     });
 
     const updatedChat = chatRepository.getChat(chatId);
@@ -95,50 +208,15 @@ const chats: FastifyPluginAsync = async (fastify): Promise<void> => {
     setupSSEResponse(reply);
 
     const assistantMessageId = randomUUID();
-    sendChunk(reply, { type: 'connected', messageId: assistantMessageId });
-
-    let fullContent = '';
-
-    try {
-      for await (const text of provider.streamCompletion(
-        updatedMessages,
-        finalModelId
-      )) {
-        fullContent += text;
-        sendChunk(reply, { type: 'text', content: text });
-      }
-
-      chatRepository.addMessageWithoutSave(chatId, {
-        id: assistantMessageId,
-        role: 'assistant',
-        content: fullContent,
-      });
-
-      if (chat.title === 'New Chat') {
-        const title = generateChatTitle(message);
-        chatRepository.updateChatWithoutSave(chatId, { title });
-      }
-
-      chatRepository.persistChat(chatId);
-
-      sendChunk(reply, { type: 'done', messageId: assistantMessageId });
-    } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-      request.log.error(error, 'Error in chat stream');
-
-      if (fullContent) {
-        chatRepository.addMessageWithoutSave(chatId, {
-          id: assistantMessageId,
-          role: 'assistant',
-          content: fullContent,
-        });
-        chatRepository.persistChat(chatId);
-      }
-
-      sendChunk(reply, { type: 'error', error: errorMessage });
-    } finally {
-      reply.raw.end();
-    }
+    await executeStream({
+      chatId,
+      messages: updatedMessages,
+      modelId: chat.modelId,
+      assistantMessageId,
+      userMessage: message,
+      request,
+      reply,
+    });
   });
 
   fastify.get<{
@@ -149,7 +227,8 @@ const chats: FastifyPluginAsync = async (fastify): Promise<void> => {
 
     try {
       const chat = chatService.getChat(userId, chatId);
-      return chat;
+      const hasActiveStream = streamManager.hasActiveStream(chatId);
+      return { ...chat, hasActiveStream };
     } catch (error: unknown) {
       if (error instanceof chatService.ChatError) {
         reply.code(error.statusCode);

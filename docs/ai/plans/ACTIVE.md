@@ -2,7 +2,7 @@
 
 **Status**: IN_PROGRESS
 **Started**: 2025-12-29
-**Phase**: Phase 5 - LLM Configuration Service
+**Phase**: Phase 6 - Stream Manager Service
 
 ---
 
@@ -35,21 +35,20 @@ Build a full-stack LLM chat application with:
 | 3 | Feature Refactoring | ✅ DONE | Migrated to features/ structure |
 | 4 | Project Plan Preview | ✅ DONE | Added project-plan feature with streaming |
 | 5 | LLM Config Service | ✅ DONE | Centralized API key management |
-| 6 | Stream Manager | ⏳ PENDING | Next commit |
+| 6 | Stream Manager | ✅ DONE | Multi-subscriber SSE streaming |
+| 7 | Final Polish | ⏳ PENDING | Next commit |
 
 ---
 
-## Current Phase: Phase 5 - LLM Configuration Service
+## Current Phase: Phase 6 - Stream Manager Service
 
 ### What Was Done
-- ✅ Added `llm-config.service.ts` for centralized API key management
-- ✅ Created API key configuration dialog UI
-- ✅ Completed component migration to features/
-- ✅ Added barrel exports (index.ts) for chat and models features
-- ✅ Added error handling components (error-fallback, message-skeleton)
-- ✅ Added new UI components (collapsible, password-input, sonner, tabs)
-- ✅ Updated all LLM providers to use llm-config service
-- ✅ Added error utilities and query client configuration
+- ✅ Added `stream-manager.service.ts` for multi-subscriber SSE streams
+- ✅ Added `custom.provider.ts` for custom LLM provider support
+- ✅ Added `features/chat/api/streaming.ts` for client-side streaming
+- ✅ Removed singular `/chat` route (merged into `/chats`)
+- ✅ Updated `/chats` route to use stream manager
+- ✅ Integrated custom provider into LLM provider index
 
 ### Files Reorganized
 - `web/src/data/queries/chats.ts` → `web/src/features/chat/api/queries.ts`
