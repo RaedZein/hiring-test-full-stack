@@ -2,7 +2,7 @@
 
 **Status**: IN_PROGRESS
 **Started**: 2025-12-29
-**Phase**: Phase 4 - Project Plan Preview Feature
+**Phase**: Phase 5 - LLM Configuration Service
 
 ---
 
@@ -34,19 +34,22 @@ Build a full-stack LLM chat application with:
 | 3 | Frontend Components | ✅ DONE | Components, hooks, React Query |
 | 3 | Feature Refactoring | ✅ DONE | Migrated to features/ structure |
 | 4 | Project Plan Preview | ✅ DONE | Added project-plan feature with streaming |
-| 5 | LLM Config Service | ⏳ PENDING | Next commit |
+| 5 | LLM Config Service | ✅ DONE | Centralized API key management |
+| 6 | Stream Manager | ⏳ PENDING | Next commit |
 
 ---
 
-## Current Phase: Phase 4 - Project Plan Preview Feature
+## Current Phase: Phase 5 - LLM Configuration Service
 
 ### What Was Done
-- ✅ Created `features/project-plan` with preview components
-- ✅ Added plan parser for markdown parsing
-- ✅ Moved chat components (message, message-content, chat-message-list) to features/
-- ✅ Added typing indicator component
-- ✅ Added chat types module
-- ✅ Added system prompts for LLM providers
+- ✅ Added `llm-config.service.ts` for centralized API key management
+- ✅ Created API key configuration dialog UI
+- ✅ Completed component migration to features/
+- ✅ Added barrel exports (index.ts) for chat and models features
+- ✅ Added error handling components (error-fallback, message-skeleton)
+- ✅ Added new UI components (collapsible, password-input, sonner, tabs)
+- ✅ Updated all LLM providers to use llm-config service
+- ✅ Added error utilities and query client configuration
 
 ### Files Reorganized
 - `web/src/data/queries/chats.ts` → `web/src/features/chat/api/queries.ts`

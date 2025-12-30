@@ -1,9 +1,9 @@
-import {Button} from "./ui/button";
+import {Button} from "../ui/button";
 import {Link} from "react-router-dom";
 import {MoonStar, Sun, TriangleAlertIcon, UserIcon} from "lucide-react";
-import {useColorScheme} from "../lib/color-scheme";
-import {useUserQuery} from "../data/queries/user";
-import Spinner from "./ui/spinner";
+import {useColorScheme} from "../../lib/color-scheme";
+import {useUserQuery} from "../../data/queries/user";
+import Spinner from "../ui/spinner";
 
 export function Navbar () {
     const { isDark, setIsDark } = useColorScheme();

@@ -3,6 +3,8 @@ import type { LLMProvider } from './types';
 import { AnthropicProvider } from './anthropic.provider';
 import { OpenAIProvider } from './openai.provider';
 import { GeminiProvider } from './gemini.provider';
+import { CustomProvider } from './custom.provider';
+import * as llmConfigService from '../../services/llm-config.service';
 
 /**
  * Provider Factory with Caching
@@ -13,40 +15,36 @@ import { GeminiProvider } from './gemini.provider';
 const providerCache = new Map<string, LLMProvider>();
 
 /**
- * Get API key from environment variables
- */
-function getApiKey(providerType: LLMProviderType): string {
-  const envKey = {
-    anthropic: process.env.ANTHROPIC_API_KEY,
-    openai: process.env.OPENAI_API_KEY,
-    gemini: process.env.GOOGLE_AI_API_KEY,
-  }[providerType];
-
-  if (!envKey) {
-    throw new Error(`No API key configured for ${providerType}. Set ${{
-      anthropic: 'ANTHROPIC_API_KEY',
-      openai: 'OPENAI_API_KEY',
-      gemini: 'GOOGLE_AI_API_KEY',
-    }[providerType]} environment variable.`);
-  }
-
-  return envKey;
-}
-
-/**
  * Get or create an LLM provider instance
  *
- * @param type - Provider type ('anthropic' | 'openai' | 'gemini')
- * @param apiKey - Optional API key (uses env var if not provided)
+ * @param type - Provider type ('anthropic' | 'openai' | 'gemini' | 'custom')
+ * @param apiKey - API key for the provider (optional, will use apiKeysService if not provided)
  * @returns Cached or newly created provider instance
  */
 export function getLLMProvider(
   type: LLMProviderType,
   apiKey?: string
 ): LLMProvider {
-  const key = apiKey || getApiKey(type);
-  const cacheKey = `${type}:${key}`;
+  // Handle custom provider specially
+  if (type === 'custom') {
+    const customConfig = llmConfigService.getCustomProvider();
+    if (!customConfig) {
+      throw new Error('Custom provider not configured');
+    }
+    const cacheKey = `custom:${customConfig.baseUrl}`;
+    if (!providerCache.has(cacheKey)) {
+      providerCache.set(cacheKey, new CustomProvider(customConfig));
+    }
+    return providerCache.get(cacheKey)!;
+  }
 
+  // For standard providers, use provided key or get from service
+  const key = apiKey || llmConfigService.getApiKey(type);
+  if (!key) {
+    throw new Error(`No API key configured for ${type}`);
+  }
+
+  const cacheKey = `${type}:${key}`;
   if (!providerCache.has(cacheKey)) {
     providerCache.set(cacheKey, createProvider(type, key));
   }
@@ -60,7 +58,7 @@ export function getLLMProvider(
  * Uses exhaustive type checking to ensure all provider types are handled.
  */
 function createProvider(
-  type: LLMProviderType,
+  type: Exclude<LLMProviderType, 'custom'>,
   apiKey: string
 ): LLMProvider {
   switch (type) {

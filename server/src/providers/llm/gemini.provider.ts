@@ -1,6 +1,7 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import type { Message, LLMModel } from '../../types';
 import type { LLMProvider } from './types';
+import * as llmConfigService from '../../services/llm-config.service';
 
 export class GeminiProvider implements LLMProvider {
   readonly providerType = 'gemini' as const;
@@ -41,6 +42,11 @@ export class GeminiProvider implements LLMProvider {
   }
 
   async listModels(): Promise<LLMModel[]> {
+    const storedModels = llmConfigService.getProviderModels('gemini');
+    if (storedModels && storedModels.length > 0) {
+      return storedModels;
+    }
+
     const apiKey = (this.client as any).apiKey;
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`
@@ -52,7 +58,7 @@ export class GeminiProvider implements LLMProvider {
 
     const data = (await response.json()) as { models: any[] };
 
-    return data.models
+    const models: LLMModel[] = data.models
       .filter((model: any) =>
         model.supportedGenerationMethods?.includes('generateContent')
       )
@@ -64,5 +70,8 @@ export class GeminiProvider implements LLMProvider {
         createdAt: new Date().toISOString(),
         ownedBy: 'google',
       }));
+
+    llmConfigService.saveProviderModels('gemini', models);
+    return models;
   }
 }

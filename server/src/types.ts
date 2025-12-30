@@ -1,4 +1,4 @@
-﻿// ============ Core Types ============
+// ============ Core Types ============
 export type MessageRole = 'user' | 'assistant';
 
 export interface Message {
@@ -16,6 +16,8 @@ export interface Chat {
   modelId: string;
   createdAt: string;
   updatedAt: string;
+  streamStatus?: 'active' | 'complete' | null;
+  partialContent?: string;
 }
 
 export interface ChatSummary {
@@ -28,7 +30,7 @@ export interface ChatSummary {
 // ============ LLM Types ============
 // CRITICAL: Only provider names are hardcoded as types
 // Model lists MUST be fetched from provider APIs dynamically
-export type LLMProviderType = 'anthropic' | 'openai' | 'gemini';
+export type LLMProviderType = 'anthropic' | 'openai' | 'gemini' | 'custom';
 
 export interface LLMModel {
   id: string;           // Provider-specific model ID (e.g., 'claude-sonnet-4-20250514')
@@ -39,13 +41,14 @@ export interface LLMModel {
   ownedBy?: string;     // Organization that owns the model (e.g., "openai", "google")
 }
 
-export type LLMStreamChunkType = 'connected' | 'text' | 'done' | 'error';
+export type LLMStreamChunkType = 'connected' | 'init' | 'text' | 'done' | 'error';
 
 export interface LLMStreamChunk {
   type: LLMStreamChunkType;
-  content?: string;    // For 'text' type
+  content?: string;    // For 'text' and 'init' types
   error?: string;      // For 'error' type
   messageId?: string;  // For 'connected' and 'done' types
+  chatId?: string;     // For 'init' type (reconnection support)
 }
 
 // ============ Project Plan Types ============
@@ -65,13 +68,9 @@ export interface ProjectPlan {
 }
 
 // ============ API Request/Response Types ============
-export interface CreateChatRequest {
-  modelId?: string;  // Uses default if not provided
-}
-
-export interface StreamMessageRequest {
-  content: string;
-  modelId?: string;  // Override chat's default model
+export interface ChatRequest {
+  chatId?: string;
+  message?: string;
 }
 
 export interface ChatListResponse {
@@ -81,4 +80,45 @@ export interface ChatListResponse {
 export interface ModelsResponse {
   models: LLMModel[];
   defaultModelId: string;
+  providerStatuses?: ProviderStatus[];
+  customProvider?: CustomProviderStatus;
+  selectedProvider?: LLMProviderType;
+  selectedModelId?: string;
+}
+
+// ============ API Request Types ============
+export interface SetProviderRequest {
+  apiKey: string;
+  baseUrl?: string;
+  modelId?: string;
+  modelName?: string;
+  customHeaders?: string;
+}
+
+export interface SetUserConfigRequest {
+  provider: LLMProviderType;
+  modelId: string;
+}
+
+// ============ API Configuration Types ============
+export interface CustomProviderConfig {
+  baseUrl: string;
+  apiKey: string;
+  modelId: string;
+  modelName: string;
+  customHeaders?: Record<string, string>;
+}
+
+export interface ProviderStatus {
+  provider: LLMProviderType;
+  isConfigured: boolean;
+  displayName: string;
+}
+
+export interface CustomProviderStatus {
+  baseUrl: string;
+  modelId: string;
+  modelName: string;
+  isConfigured: boolean;
+  hasCustomHeaders: boolean;
 }

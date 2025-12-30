@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import type { Message, LLMModel } from '../../types';
 import type { LLMProvider } from './types';
+import * as llmConfigService from '../../services/llm-config.service';
 
 export class AnthropicProvider implements LLMProvider {
   readonly providerType = 'anthropic' as const;
@@ -37,9 +38,14 @@ export class AnthropicProvider implements LLMProvider {
   }
 
   async listModels(): Promise<LLMModel[]> {
+    const storedModels = llmConfigService.getProviderModels('anthropic');
+    if (storedModels && storedModels.length > 0) {
+      return storedModels;
+    }
+
     const response = await this.client.models.list();
 
-    return response.data.map((model) => ({
+    const models: LLMModel[] = response.data.map((model) => ({
       id: model.id,
       name: (model as any).display_name || model.id,
       provider: 'anthropic',
@@ -47,5 +53,8 @@ export class AnthropicProvider implements LLMProvider {
       createdAt: model.created_at,
       ownedBy: 'anthropic',
     }));
+
+    llmConfigService.saveProviderModels('anthropic', models);
+    return models;
   }
 }

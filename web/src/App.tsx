@@ -1,19 +1,13 @@
 import React from 'react';
-import {Navbar} from "./components/navbar";
+import {Navbar} from "./components/layout/navbar";
 import {createBrowserRouter, Outlet, RouterProvider} from "react-router-dom";
 import {HomePage} from "./pages/home-page";
-import {QueryClient, QueryClientProvider} from "@tanstack/react-query";
+import {QueryClientProvider} from "@tanstack/react-query";
 import {ReactQueryDevtools} from "@tanstack/react-query-devtools";
-import {Toaster} from "sonner";
-
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      staleTime: 1000 * 60 * 5,
-      refetchOnWindowFocus: false,
-    },
-  },
-});
+import {ErrorBoundary} from "react-error-boundary";
+import {Toaster} from "./components/ui/sonner";
+import {ErrorFallback} from "./components/layout/error-fallback";
+import {queryClient} from "./lib/query-client";
 
 const router = createBrowserRouter([
     {
@@ -37,11 +31,13 @@ const router = createBrowserRouter([
 
 function App() {
     return (
-        <QueryClientProvider client={queryClient}>
-            <RouterProvider router={router} />
-            <ReactQueryDevtools />
-            <Toaster position="top-right" richColors />
-        </QueryClientProvider>
+        <ErrorBoundary FallbackComponent={ErrorFallback}>
+            <QueryClientProvider client={queryClient}>
+                <RouterProvider router={router} />
+                <ReactQueryDevtools />
+                <Toaster position="bottom-right" />
+            </QueryClientProvider>
+        </ErrorBoundary>
     );
 }
 

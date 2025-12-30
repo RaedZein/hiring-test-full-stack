@@ -1,6 +1,7 @@
 import OpenAI from 'openai';
 import type { Message, LLMModel } from '../../types';
 import type { LLMProvider } from './types';
+import * as llmConfigService from '../../services/llm-config.service';
 
 export class OpenAIProvider implements LLMProvider {
   readonly providerType = 'openai' as const;
@@ -44,9 +45,14 @@ export class OpenAIProvider implements LLMProvider {
   }
 
   async listModels(): Promise<LLMModel[]> {
+    const storedModels = llmConfigService.getProviderModels('openai');
+    if (storedModels && storedModels.length > 0) {
+      return storedModels;
+    }
+
     const response = await this.client.models.list();
 
-    return response.data
+    const models: LLMModel[] = response.data
       .filter((model) => model.id.includes('gpt'))
       .map((model) => ({
         id: model.id,
@@ -56,5 +62,8 @@ export class OpenAIProvider implements LLMProvider {
         createdAt: new Date(model.created * 1000).toISOString(),
         ownedBy: model.owned_by,
       }));
+
+    llmConfigService.saveProviderModels('openai', models);
+    return models;
   }
 }
