@@ -7,21 +7,30 @@ import { kv } from '@vercel/kv';
  */
 
 const USE_KV = !!process.env.KV_REST_API_URL;
-const DATA_DIR = path.join(process.cwd(), 'data');
+const IS_VERCEL = !!process.env.VERCEL;
+const DATA_DIR = IS_VERCEL ? '/tmp/data' : path.join(process.cwd(), 'data');
 const CHATS_DIR = path.join(DATA_DIR, 'chats');
 
 function ensureDataDir(): void {
   if (USE_KV) return;
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
+  try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+  } catch {
+    // Ignore on serverless
   }
 }
 
 export function ensureChatsDir(): void {
   if (USE_KV) return;
   ensureDataDir();
-  if (!fs.existsSync(CHATS_DIR)) {
-    fs.mkdirSync(CHATS_DIR, { recursive: true });
+  try {
+    if (!fs.existsSync(CHATS_DIR)) {
+      fs.mkdirSync(CHATS_DIR, { recursive: true });
+    }
+  } catch {
+    // Ignore on serverless
   }
 }
 

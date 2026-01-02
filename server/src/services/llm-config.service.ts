@@ -99,6 +99,11 @@ function initializeFromEnv(): void {
 }
 
 function readStoredConfig(): LLMConfig {
+  // On Vercel with KV, always use env vars since sync reads don't work with KV
+  if (process.env.KV_REST_API_URL) {
+    return getConfigFromEnv();
+  }
+
   const stored = readJsonFile<LLMConfig>(LLM_CONFIG_FILE, {});
 
   const isEmpty = Object.keys(stored).length === 0;
@@ -108,6 +113,37 @@ function readStoredConfig(): LLMConfig {
   }
 
   return stored;
+}
+
+function getConfigFromEnv(): LLMConfig {
+  const config: LLMConfig = {};
+
+  const defaultProvider = process.env.DEFAULT_LLM_PROVIDER as LLMProviderType | undefined;
+  const defaultApiKey = process.env.DEFAULT_API_KEY;
+  const defaultBaseUrl = process.env.DEFAULT_BASE_URL;
+  const defaultModel = process.env.DEFAULT_MODEL;
+
+  if (defaultProvider && defaultApiKey) {
+    if (defaultProvider === 'custom' && defaultBaseUrl && defaultModel) {
+      config.custom = {
+        baseUrl: defaultBaseUrl,
+        apiKey: encrypt(defaultApiKey),
+        modelId: defaultModel,
+        modelName: defaultModel,
+      };
+    } else if (defaultProvider !== 'custom') {
+      config[defaultProvider] = encrypt(defaultApiKey);
+    }
+  }
+
+  if (defaultProvider) {
+    config.selectedProvider = defaultProvider;
+  }
+  if (defaultModel) {
+    config.selectedModelId = defaultModel;
+  }
+
+  return config;
 }
 
 function writeStoredConfig(config: LLMConfig): void {
