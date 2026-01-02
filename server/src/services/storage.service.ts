@@ -1,137 +1,153 @@
 import fs from 'fs';
 import path from 'path';
+import { kv } from '@vercel/kv';
 
 /**
- * Generic JSON File Storage Service
- *
- * Provides persistent storage for application data using JSON files.
- * All data is stored in the `data/` directory (gitignored).
+ * Storage Service with Vercel KV support
  */
 
+const USE_KV = !!process.env.KV_REST_API_URL;
 const DATA_DIR = path.join(process.cwd(), 'data');
 const CHATS_DIR = path.join(DATA_DIR, 'chats');
 
-/**
- * Ensure the data directory exists
- */
 function ensureDataDir(): void {
+  if (USE_KV) return;
   if (!fs.existsSync(DATA_DIR)) {
     fs.mkdirSync(DATA_DIR, { recursive: true });
   }
 }
 
-/**
- * Ensure the chats subdirectory exists
- */
 export function ensureChatsDir(): void {
+  if (USE_KV) return;
   ensureDataDir();
   if (!fs.existsSync(CHATS_DIR)) {
     fs.mkdirSync(CHATS_DIR, { recursive: true });
   }
 }
 
-/**
- * Get the full path for a storage file
- */
 function getFilePath(filename: string): string {
   return path.join(DATA_DIR, filename);
 }
 
-/**
- * Get the full path for a chat file
- */
 export function getChatFilePath(chatId: string): string {
   return path.join(CHATS_DIR, `${chatId}.json`);
 }
 
-/**
- * List all chat files in the chats directory
- */
 export function listChatFiles(): string[] {
+  if (USE_KV) {
+    // Sync wrapper - will be called at startup
+    return [];
+  }
   ensureChatsDir();
   return fs.readdirSync(CHATS_DIR)
     .filter(file => file.endsWith('.json'))
     .map(file => file.replace('.json', ''));
 }
 
-/**
- * Read data from a JSON file
- * Returns the default value if file doesn't exist
- */
+export async function listChatFilesAsync(): Promise<string[]> {
+  if (USE_KV) {
+    const keys = await kv.keys('chat:*');
+    return keys.map(k => k.replace('chat:', ''));
+  }
+  ensureChatsDir();
+  return fs.readdirSync(CHATS_DIR)
+    .filter(file => file.endsWith('.json'))
+    .map(file => file.replace('.json', ''));
+}
+
 export function readJsonFile<T>(filename: string, defaultValue: T): T {
+  if (USE_KV) return defaultValue;
   ensureDataDir();
   const filePath = getFilePath(filename);
-
-  if (!fs.existsSync(filePath)) {
-    return defaultValue;
-  }
-
+  if (!fs.existsSync(filePath)) return defaultValue;
   try {
-    const content = fs.readFileSync(filePath, 'utf8');
-    return JSON.parse(content) as T;
+    return JSON.parse(fs.readFileSync(filePath, 'utf8')) as T;
   } catch {
     return defaultValue;
   }
 }
 
-/**
- * Write data to a JSON file
- */
-export function writeJsonFile<T>(filename: string, data: T): void {
-  ensureDataDir();
-  const filePath = getFilePath(filename);
-  fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
-}
-
-/**
- * Delete a JSON file
- */
-export function deleteJsonFile(filename: string): void {
-  const filePath = getFilePath(filename);
-  if (fs.existsSync(filePath)) {
-    fs.unlinkSync(filePath);
+export async function readJsonFileAsync<T>(filename: string, defaultValue: T): Promise<T> {
+  if (USE_KV) {
+    const data = await kv.get<T>(`file:${filename}`);
+    return data ?? defaultValue;
   }
+  return readJsonFile(filename, defaultValue);
 }
 
-/**
- * Check if a JSON file exists
- */
+export function writeJsonFile<T>(filename: string, data: T): void {
+  if (USE_KV) {
+    kv.set(`file:${filename}`, data);
+    return;
+  }
+  ensureDataDir();
+  fs.writeFileSync(getFilePath(filename), JSON.stringify(data, null, 2), 'utf8');
+}
+
+export async function writeJsonFileAsync<T>(filename: string, data: T): Promise<void> {
+  if (USE_KV) {
+    await kv.set(`file:${filename}`, data);
+    return;
+  }
+  writeJsonFile(filename, data);
+}
+
+export function deleteJsonFile(filename: string): void {
+  if (USE_KV) {
+    kv.del(`file:${filename}`);
+    return;
+  }
+  const filePath = getFilePath(filename);
+  if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+}
+
 export function jsonFileExists(filename: string): boolean {
+  if (USE_KV) return false;
   return fs.existsSync(getFilePath(filename));
 }
 
-/**
- * Read a chat file by ID
- */
 export function readChatFile<T>(chatId: string, defaultValue: T): T {
+  if (USE_KV) return defaultValue;
   ensureChatsDir();
   const filePath = getChatFilePath(chatId);
-
-  if (!fs.existsSync(filePath)) {
-    return defaultValue;
-  }
-
+  if (!fs.existsSync(filePath)) return defaultValue;
   try {
-    const content = fs.readFileSync(filePath, 'utf8');
-    return JSON.parse(content) as T;
+    return JSON.parse(fs.readFileSync(filePath, 'utf8')) as T;
   } catch {
     return defaultValue;
   }
 }
 
-/**
- * Write a chat file by ID
- */
-export function writeChatFile<T>(chatId: string, data: T): void {
-  ensureChatsDir();
-  const filePath = getChatFilePath(chatId);
-  fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
+export async function readChatFileAsync<T>(chatId: string, defaultValue: T): Promise<T> {
+  if (USE_KV) {
+    const data = await kv.get<T>(`chat:${chatId}`);
+    return data ?? defaultValue;
+  }
+  return readChatFile(chatId, defaultValue);
 }
 
-/**
- * Delete a chat file by ID
- */
+export function writeChatFile<T>(chatId: string, data: T): void {
+  if (USE_KV) {
+    kv.set(`chat:${chatId}`, data);
+    return;
+  }
+  ensureChatsDir();
+  fs.writeFileSync(getChatFilePath(chatId), JSON.stringify(data, null, 2), 'utf8');
+}
+
+export async function writeChatFileAsync<T>(chatId: string, data: T): Promise<void> {
+  if (USE_KV) {
+    await kv.set(`chat:${chatId}`, data);
+    return;
+  }
+  writeChatFile(chatId, data);
+}
+
 export function deleteChatFile(chatId: string): boolean {
+  if (USE_KV) {
+    kv.del(`chat:${chatId}`);
+    return true;
+  }
   const filePath = getChatFilePath(chatId);
   if (fs.existsSync(filePath)) {
     fs.unlinkSync(filePath);
@@ -140,9 +156,14 @@ export function deleteChatFile(chatId: string): boolean {
   return false;
 }
 
-/**
- * Check if a chat file exists
- */
 export function chatFileExists(chatId: string): boolean {
+  if (USE_KV) return false;
   return fs.existsSync(getChatFilePath(chatId));
+}
+
+export async function chatFileExistsAsync(chatId: string): Promise<boolean> {
+  if (USE_KV) {
+    return (await kv.exists(`chat:${chatId}`)) > 0;
+  }
+  return chatFileExists(chatId);
 }

@@ -3,7 +3,9 @@
 RepoMapper
 .repomap.tags.cache.v1
 .repomapper
-package-lock.json
 .serena/
 server/data/
 server/.env
+.vercel
+server/package-lock.json
+web/package-lock.json

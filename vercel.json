@@ -1,0 +1,15 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "cd web && npm install && npm run build && cd ../server && npm install && npm run build:ts && cd ../api && npm install",
+  "outputDirectory": "web/build",
+  "framework": "create-react-app",
+  "routes": [
+    { "src": "/api/(.*)", "dest": "/api/index.ts" }
+  ],
+  "functions": {
+    "api/index.ts": {
+      "memory": 1024,
+      "maxDuration": 30
+    }
+  }
+}
