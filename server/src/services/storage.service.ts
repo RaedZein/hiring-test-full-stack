@@ -11,6 +11,10 @@ const IS_VERCEL = !!process.env.VERCEL;
 const DATA_DIR = IS_VERCEL ? '/tmp/data' : path.join(process.cwd(), 'data');
 const CHATS_DIR = path.join(DATA_DIR, 'chats');
 
+// In-memory cache for KV writes (since sync reads can't access KV)
+const kvCache = new Map<string, any>();
+let kvCacheLoaded = false;
+
 function ensureDataDir(): void {
   if (USE_KV) return;
   try {
@@ -44,8 +48,21 @@ export function getChatFilePath(chatId: string): string {
 
 export function listChatFiles(): string[] {
   if (USE_KV) {
-    // Sync wrapper - will be called at startup
-    return [];
+    // Load from KV async and populate cache on first call
+    if (!kvCacheLoaded) {
+      listChatFilesAsync().then(ids => {
+        ids.forEach(id => {
+          readChatFileAsync(id, null).then(chat => {
+            if (chat) kvCache.set(`chat:${id}`, chat);
+          });
+        });
+        kvCacheLoaded = true;
+      });
+      return [];
+    }
+    return Array.from(kvCache.keys())
+      .filter(k => k.startsWith('chat:'))
+      .map(k => k.replace('chat:', ''));
   }
   ensureChatsDir();
   return fs.readdirSync(CHATS_DIR)
@@ -116,7 +133,10 @@ export function jsonFileExists(filename: string): boolean {
 }
 
 export function readChatFile<T>(chatId: string, defaultValue: T): T {
-  if (USE_KV) return defaultValue;
+  if (USE_KV) {
+    const cached = kvCache.get(`chat:${chatId}`);
+    return (cached as T) ?? defaultValue;
+  }
   ensureChatsDir();
   const filePath = getChatFilePath(chatId);
   if (!fs.existsSync(filePath)) return defaultValue;
@@ -137,6 +157,7 @@ export async function readChatFileAsync<T>(chatId: string, defaultValue: T): Pro
 
 export function writeChatFile<T>(chatId: string, data: T): void {
   if (USE_KV) {
+    kvCache.set(`chat:${chatId}`, data);
     kv.set(`chat:${chatId}`, data);
     return;
   }
@@ -154,6 +175,7 @@ export async function writeChatFileAsync<T>(chatId: string, data: T): Promise<vo
 
 export function deleteChatFile(chatId: string): boolean {
   if (USE_KV) {
+    kvCache.delete(`chat:${chatId}`);
     kv.del(`chat:${chatId}`);
     return true;
   }
@@ -166,7 +188,9 @@ export function deleteChatFile(chatId: string): boolean {
 }
 
 export function chatFileExists(chatId: string): boolean {
-  if (USE_KV) return false;
+  if (USE_KV) {
+    return kvCache.has(`chat:${chatId}`);
+  }
   return fs.existsSync(getChatFilePath(chatId));
 }
 
