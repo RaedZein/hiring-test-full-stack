@@ -3,9 +3,10 @@ import type { Chat, Message, ChatSummary } from '../types';
 import {
   listChatFiles,
   readChatFile,
-  writeChatFile,
+  writeChatFileAndWait,
   deleteChatFile,
   ensureChatsDir,
+  waitForCacheInit,
 } from '../services/storage.service';
 
 /**
@@ -16,35 +17,42 @@ import {
  */
 
 /**
- * Load chats from per-chat files into memory on startup
+ * In-memory chat storage
  */
-function loadChats(): Map<string, Chat> {
-  ensureChatsDir();
+const chats = new Map<string, Chat>();
 
+/**
+ * Load chats from storage on first access (lazy loading)
+ */
+let chatsLoaded = false;
+async function ensureChatsLoaded(): Promise<void> {
+  if (chatsLoaded) return;
+
+  // Wait for KV cache to initialize
+  await waitForCacheInit();
+
+  ensureChatsDir();
   const chatIds = listChatFiles();
-  const chatsMap = new Map<string, Chat>();
 
   for (const chatId of chatIds) {
     const chat = readChatFile<Chat | null>(chatId, null);
     if (chat) {
-      chatsMap.set(chatId, chat);
+      chats.set(chatId, chat);
     }
   }
 
-  return chatsMap;
+  chatsLoaded = true;
 }
 
 /**
  * Save a single chat to its file
  */
-function saveChat(chatId: string): void {
+async function saveChat(chatId: string): Promise<void> {
   const chat = chats.get(chatId);
   if (chat) {
-    writeChatFile(chatId, chat);
+    await writeChatFileAndWait(chatId, chat);
   }
 }
-
-const chats = loadChats();
 
 function generateId(): string {
   return randomUUID();
@@ -72,11 +80,11 @@ function getDefaultModelId(): string {
 /**
  * Create a new chat
  */
-export function createChat(
+export async function createChat(
   userId: string,
   modelId?: string,
   title?: string
-): Chat {
+): Promise<Chat> {
   const now = new Date().toISOString();
 
   const finalModelId = modelId || getDefaultModelId();
@@ -95,21 +103,23 @@ export function createChat(
   };
 
   chats.set(chat.id, chat);
-  saveChat(chat.id);
+  await saveChat(chat.id);
   return chat;
 }
 
 /**
  * Get a chat by ID
  */
-export function getChat(chatId: string): Chat | null {
+export async function getChat(chatId: string): Promise<Chat | null> {
+  await ensureChatsLoaded();
   return chats.get(chatId) || null;
 }
 
 /**
  * List all chats for a user
  */
-export function listChats(userId: string): Chat[] {
+export async function listChats(userId: string): Promise<Chat[]> {
+  await ensureChatsLoaded();
   return Array.from(chats.values())
     .filter((chat) => chat.userId === userId)
     .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
@@ -118,8 +128,9 @@ export function listChats(userId: string): Chat[] {
 /**
  * Get chat summaries for a user (without full message history)
  */
-export function getChatSummaries(userId: string): ChatSummary[] {
-  return listChats(userId).map((chat) => ({
+export async function getChatSummaries(userId: string): Promise<ChatSummary[]> {
+  const chats = await listChats(userId);
+  return chats.map((chat) => ({
     id: chat.id,
     title: chat.title,
     updatedAt: chat.updatedAt,
@@ -130,10 +141,10 @@ export function getChatSummaries(userId: string): ChatSummary[] {
 /**
  * Add a message to a chat
  */
-export function addMessage(
+export async function addMessage(
   chatId: string,
   message: Partial<Message> & Pick<Message, 'role' | 'content'>
-): Message {
+): Promise<Message> {
   const chat = chats.get(chatId);
   if (!chat) {
     throw new Error(`Chat not found: ${chatId}`);
@@ -149,7 +160,7 @@ export function addMessage(
 
   chat.messages.push(fullMessage);
   chat.updatedAt = now;
-  saveChat(chatId);
+  await saveChat(chatId);
 
   return fullMessage;
 }
@@ -197,17 +208,17 @@ export function updateLastMessage(chatId: string, content: string): void {
 /**
  * Save a chat to disk (call after streaming completes)
  */
-export function persistChat(chatId: string): void {
-  saveChat(chatId);
+export async function persistChat(chatId: string): Promise<void> {
+  await saveChat(chatId);
 }
 
 /**
  * Update a chat's properties
  */
-export function updateChat(
+export async function updateChat(
   chatId: string,
   updates: Partial<Omit<Chat, 'id' | 'userId' | 'createdAt'>>
-): Chat {
+): Promise<Chat> {
   const chat = chats.get(chatId);
   if (!chat) {
     throw new Error(`Chat not found: ${chatId}`);
@@ -215,7 +226,7 @@ export function updateChat(
 
   Object.assign(chat, updates);
   chat.updatedAt = new Date().toISOString();
-  saveChat(chatId);
+  await saveChat(chatId);
 
   return chat;
 }

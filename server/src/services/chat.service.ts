@@ -28,12 +28,12 @@ export class ChatError extends Error {
  * @param modelId - Optional model ID (defaults to DEFAULT_MODEL_ID from env)
  * @returns Newly created chat
  */
-export function createChat(userId: string, modelId?: string): Chat {
+export async function createChat(userId: string, modelId?: string): Promise<Chat> {
   if (!userId) {
     throw new ChatError('User ID is required', 400);
   }
 
-  return chatRepository.createChat(userId, modelId);
+  return await chatRepository.createChat(userId, modelId);
 }
 
 /**
@@ -44,7 +44,7 @@ export function createChat(userId: string, modelId?: string): Chat {
  * @returns Chat if found and owned by user
  * @throws ChatError if not found or not owned by user
  */
-export function getChat(userId: string, chatId: string): Chat {
+export async function getChat(userId: string, chatId: string): Promise<Chat> {
   if (!userId) {
     throw new ChatError('User ID is required', 400);
   }
@@ -53,7 +53,7 @@ export function getChat(userId: string, chatId: string): Chat {
     throw new ChatError('Chat ID is required', 400);
   }
 
-  const chat = chatRepository.getChat(chatId);
+  const chat = await chatRepository.getChat(chatId);
 
   if (!chat) {
     throw new ChatError('Chat not found', 404);
@@ -72,7 +72,7 @@ export function getChat(userId: string, chatId: string): Chat {
  * @param userId - User ID
  * @returns Array of chat summaries
  */
-export function listChats(userId: string): ChatSummary[] {
+export async function listChats(userId: string): Promise<ChatSummary[]> {
   if (!userId) {
     throw new ChatError('User ID is required', 400);
   }
@@ -87,7 +87,7 @@ export function listChats(userId: string): ChatSummary[] {
  * @param chatId - Chat ID to delete
  * @throws ChatError if not found or not owned by user
  */
-export function deleteChat(userId: string, chatId: string): void {
+export async function deleteChat(userId: string, chatId: string): Promise<void> {
   if (!userId) {
     throw new ChatError('User ID is required', 400);
   }
@@ -96,7 +96,7 @@ export function deleteChat(userId: string, chatId: string): void {
     throw new ChatError('Chat ID is required', 400);
   }
 
-  const chat = chatRepository.getChat(chatId);
+  const chat = await chatRepository.getChat(chatId);
 
   if (!chat) {
     throw new ChatError('Chat not found', 404);
@@ -118,11 +118,11 @@ export function deleteChat(userId: string, chatId: string): void {
  * @returns Updated chat
  * @throws ChatError if not found or not owned by user
  */
-export function updateChatTitle(
+export async function updateChatTitle(
   userId: string,
   chatId: string,
   title: string
-): Chat {
+): Promise<Chat> {
   if (!userId) {
     throw new ChatError('User ID is required', 400);
   }
@@ -131,7 +131,7 @@ export function updateChatTitle(
     throw new ChatError('Chat ID is required', 400);
   }
 
-  const chat = chatRepository.getChat(chatId);
+  const chat = await chatRepository.getChat(chatId);
 
   if (!chat) {
     throw new ChatError('Chat not found', 404);
@@ -141,5 +141,5 @@ export function updateChatTitle(
     throw new ChatError('Unauthorized: Chat does not belong to user', 403);
   }
 
-  return chatRepository.updateChat(chatId, { title });
+  return await chatRepository.updateChat(chatId, { title });
 }

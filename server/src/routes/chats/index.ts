@@ -18,8 +18,9 @@ const SSE_HEADERS = {
   'Access-Control-Allow-Methods': 'POST, GET',
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
   'Content-Type': 'text/event-stream',
-  'Cache-Control': 'no-cache',
+  'Cache-Control': 'no-cache, no-transform',
   'Connection': 'keep-alive',
+  'X-Accel-Buffering': 'no',
 } as const;
 
 function setupSSEResponse(reply: FastifyReply): void {
@@ -68,13 +69,13 @@ async function executeStream(ctx: StreamContext): Promise<void> {
       content: fullContent,
     });
 
-    const chat = chatRepository.getChat(chatId);
+    const chat = await chatRepository.getChat(chatId);
     if (userMessage && chat?.title === 'New Chat') {
       const title = generateChatTitle(userMessage);
       chatRepository.updateChatWithoutSave(chatId, { title });
     }
 
-    chatRepository.persistChat(chatId);
+    await chatRepository.persistChat(chatId);
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
     request.log.error(error, 'Error in chat stream');
@@ -86,7 +87,7 @@ async function executeStream(ctx: StreamContext): Promise<void> {
         role: 'assistant',
         content: partialContent,
       });
-      chatRepository.persistChat(chatId);
+      await chatRepository.persistChat(chatId);
     }
   }
 }
@@ -123,7 +124,7 @@ function generateChatTitle(firstMessage: string): string {
 const chats: FastifyPluginAsync = async (fastify): Promise<void> => {
   fastify.get<{ Reply: ChatListResponse }>('/', async (request) => {
     const userId = request.userId;
-    const chats = chatService.listChats(userId);
+    const chats = await chatService.listChats(userId);
 
     return { chats };
   });
@@ -135,14 +136,14 @@ const chats: FastifyPluginAsync = async (fastify): Promise<void> => {
     const { message } = request.body;
 
     const selectedModelId = llmConfigService.getSelectedModelId();
-    const chat = chatService.createChat(userId, selectedModelId);
+    const chat = await chatService.createChat(userId, selectedModelId);
 
     chatRepository.addMessageWithoutSave(chat.id, {
       role: 'user',
       content: message,
     });
 
-    chatRepository.persistChat(chat.id);
+    await chatRepository.persistChat(chat.id);
 
     reply.code(201);
     return { id: chat.id };
@@ -156,8 +157,8 @@ const chats: FastifyPluginAsync = async (fastify): Promise<void> => {
     const { id: chatId } = request.params;
     const { message } = request.body;
 
-    const chat = chatService.getChat(userId, chatId);
-    const currentChat = chatRepository.getChat(chatId);
+    const chat = await chatService.getChat(userId, chatId);
+    const currentChat = await chatRepository.getChat(chatId);
     const currentMessages = currentChat?.messages || [];
 
     if (!message) {
@@ -202,7 +203,7 @@ const chats: FastifyPluginAsync = async (fastify): Promise<void> => {
       content: message,
     });
 
-    const updatedChat = chatRepository.getChat(chatId);
+    const updatedChat = await chatRepository.getChat(chatId);
     const updatedMessages = updatedChat?.messages || [];
 
     setupSSEResponse(reply);
@@ -226,7 +227,7 @@ const chats: FastifyPluginAsync = async (fastify): Promise<void> => {
     const { id: chatId } = request.params;
 
     try {
-      const chat = chatService.getChat(userId, chatId);
+      const chat = await chatService.getChat(userId, chatId);
       const hasActiveStream = streamManager.hasActiveStream(chatId);
       return { ...chat, hasActiveStream };
     } catch (error: unknown) {

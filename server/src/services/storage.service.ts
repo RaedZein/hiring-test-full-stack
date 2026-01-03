@@ -13,7 +13,44 @@ const CHATS_DIR = path.join(DATA_DIR, 'chats');
 
 // In-memory cache for KV writes (since sync reads can't access KV)
 const kvCache = new Map<string, any>();
-let kvCacheLoaded = false;
+
+// Promise to track cache initialization
+let cacheInitPromise: Promise<void> | null = null;
+
+// Initialize cache from KV on startup
+if (USE_KV) {
+  cacheInitPromise = (async () => {
+    try {
+      // Load chats
+      const keys = await kv.keys('chat:*');
+      for (const key of keys) {
+        const value = await kv.get(key);
+        if (value) {
+          kvCache.set(key, value);
+        }
+      }
+      console.log(`[KV] Loaded ${keys.length} chats into cache`);
+
+      // Load config
+      const config = await kv.get('file:llm-config.json');
+      if (config) {
+        kvCache.set('file:llm-config.json', config);
+        console.log('[KV] Loaded llm-config into cache');
+      }
+    } catch (err) {
+      console.error('[KV] Failed to load cache:', err);
+    }
+  })();
+}
+
+/**
+ * Wait for cache to be initialized (only needed when KV is enabled)
+ */
+export async function waitForCacheInit(): Promise<void> {
+  if (cacheInitPromise) {
+    await cacheInitPromise;
+  }
+}
 
 function ensureDataDir(): void {
   if (USE_KV) return;
@@ -48,18 +85,7 @@ export function getChatFilePath(chatId: string): string {
 
 export function listChatFiles(): string[] {
   if (USE_KV) {
-    // Load from KV async and populate cache on first call
-    if (!kvCacheLoaded) {
-      listChatFilesAsync().then(ids => {
-        ids.forEach(id => {
-          readChatFileAsync(id, null).then(chat => {
-            if (chat) kvCache.set(`chat:${id}`, chat);
-          });
-        });
-        kvCacheLoaded = true;
-      });
-      return [];
-    }
+    // Return chat IDs from cache
     return Array.from(kvCache.keys())
       .filter(k => k.startsWith('chat:'))
       .map(k => k.replace('chat:', ''));
@@ -158,15 +184,25 @@ export async function readChatFileAsync<T>(chatId: string, defaultValue: T): Pro
 export function writeChatFile<T>(chatId: string, data: T): void {
   if (USE_KV) {
     kvCache.set(`chat:${chatId}`, data);
-    kv.set(`chat:${chatId}`, data);
+    kv.set(`chat:${chatId}`, data).catch(err => console.error('KV write error:', err));
     return;
   }
   ensureChatsDir();
   fs.writeFileSync(getChatFilePath(chatId), JSON.stringify(data, null, 2), 'utf8');
 }
 
+export async function writeChatFileAndWait<T>(chatId: string, data: T): Promise<void> {
+  if (USE_KV) {
+    kvCache.set(`chat:${chatId}`, data);
+    await kv.set(`chat:${chatId}`, data);
+    return;
+  }
+  writeChatFile(chatId, data);
+}
+
 export async function writeChatFileAsync<T>(chatId: string, data: T): Promise<void> {
   if (USE_KV) {
+    kvCache.set(`chat:${chatId}`, data);
     await kv.set(`chat:${chatId}`, data);
     return;
   }
@@ -176,7 +212,8 @@ export async function writeChatFileAsync<T>(chatId: string, data: T): Promise<vo
 export function deleteChatFile(chatId: string): boolean {
   if (USE_KV) {
     kvCache.delete(`chat:${chatId}`);
-    kv.del(`chat:${chatId}`);
+    // Fire and forget async delete
+    kv.del(`chat:${chatId}`).catch(err => console.error('KV delete error:', err));
     return true;
   }
   const filePath = getChatFilePath(chatId);
